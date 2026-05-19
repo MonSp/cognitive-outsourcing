@@ -1,0 +1,182 @@
+{
+  "1": {
+    "scenario": 1,
+    "name": "Long-sequence stress test",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 8192
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: What are the top attractions in Paris?\nTurn 2: User: How is the weather in Rome?\nTurn 3: User: Are there flights from Tokyo to London?\nTurn 4: User: What are the top attractions in London?\nTurn 5: User: How is the weather in Newyork?\nTurn 6: User: Are there flights from Sydney to Paris?\nTurn 7: User: What are the top attractions in Paris?\nTurn 8: User: How is the weather in Rome?\nTurn 9: User: Are there flights from Tokyo to London?\nTurn 10: User: What are the top attractions in London?\nTurn 11: User: How is the weather in Newyork?\nTurn 12: User: Are there flights from Sydney to Paris?\nTurn 13: User: What are the top attractions in Paris?\nTurn 14: User: How is the weather in Rome?\nTurn 15: User: Are there flights from Tokyo to London?\nTurn 16: User: What are the top attractions in London?\nTurn 17: User: How is the weather in Newyork?\nTurn 18: User: Are there flights from Sydney to Paris?\nTurn 19: User: What are the top attractions in Paris?\nTurn 20: User: How is the weather in Rome?\nTurn 21: User: Are there flights from Tokyo to London?\nTurn 22: User: What are the top attractions in London?"
+      }
+    ]
+  },
+  "2": {
+    "scenario": 2,
+    "name": "Multi-tool chain",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 4096
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: I want to plan a trip from Paris to Rome. I need to know the attractions in both cities, the weather in Rome, and flight options. Help me with all of this.\nTurn 2: User: Continue finding the remaining information.\nTurn 3: User: What about the weather?\nTurn 4: User: And the flights?\nTurn 5: User: Now give me a complete travel summary based on all the information you gathered."
+      }
+    ]
+  },
+  "3": {
+    "scenario": 3,
+    "name": "Rapid-fire short queries",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 4096
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: Weather in Paris?\nTurn 2: User: Attractions in Tokyo?\nTurn 3: User: Flights London to Paris?\nTurn 4: User: Weather in Dubai?\nTurn 5: User: Attractions in Rome?\nTurn 6: User: Flights NY to London?\nTurn 7: User: Weather in Sydney?\nTurn 8: User: Attractions in Beijing?\nTurn 9: User: Flights Sydney to Tokyo?\nTurn 10: User: Weather in London?\nTurn 11: User: Attractions in Dubai?\nTurn 12: User: Flights Beijing to Dubai?"
+      }
+    ]
+  },
+  "4": {
+    "scenario": 4,
+    "name": "Long-document + tool calls",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 4096
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: Based on the background info, what are the attractions in Paris?\nTurn 2: User: What's the weather like there?\nTurn 3: User: Any flights from New York to Tokyo?\nTurn 4: User: How about London to Dubai?\nTurn 5: User: Summarize all the travel information you've gathered for me."
+      }
+    ]
+  },
+  "5": {
+    "scenario": 5,
+    "name": "Mixed conversation",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 4096
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: Hello! I'm thinking about traveling somewhere nice.\nTurn 2: User: What are the attractions in Paris?\nTurn 3: User: That sounds lovely! Is it expensive to visit?\nTurn 4: User: What's the weather like in Paris right now?\nTurn 5: User: Great weather! I also love Italian food. Any attractions in Rome?\nTurn 6: User: Can you compare Paris and Rome for me as travel destinations?\nTurn 7: User: Are there flights from Paris to Rome?\nTurn 8: User: Thanks! I think I'll visit both cities. Any packing tips?"
+      }
+    ]
+  },
+  "6": {
+    "scenario": 6,
+    "name": "Deep tool chain",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 8192
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: I'm planning a round-the-world trip starting from New York. First, I want to see attractions in New York.\nTurn 2: User: Great! Now check the weather in New York.\nTurn 3: User: Next stop: London. What attractions are there?\nTurn 4: User: How's the weather in London?\nTurn 5: User: Find me flights from New York to London.\nTurn 6: User: After London, I want to visit Paris. What attractions are there?\nTurn 7: User: Check the weather in Paris too.\nTurn 8: User: Find flights from London to Paris.\nTurn 9: User: Then I want to go to Dubai. Show me attractions there.\nTurn 10: User: What's the weather like in Dubai?\nTurn 11: User: Find flights from Paris to Dubai.\nTurn 12: User: Finally, I want to visit Tokyo. What are the top attractions?\nTurn 13: User: Check Tokyo's weather as well.\nTurn 14: User: Find flights from Dubai to Tokyo.\nTurn 15: User: Now give me a complete round-the-world itinerary summary with all the information you gathered."
+      }
+    ]
+  },
+  "7": {
+    "scenario": 7,
+    "name": "Travel planning (multi-turn)",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 6144
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: I'm planning a trip from New York to Tokyo with stops in London and Dubai. What are the top attractions in New York?\nTurn 2: User: What's the weather like in New York right now?\nTurn 3: User: Find me flights from New York to London please.\nTurn 4: User: Now what attractions should I see in London?\nTurn 5: User: How's the weather in London?\nTurn 6: User: I need flights from London to Dubai next.\nTurn 7: User: What are the must-see attractions in Dubai?\nTurn 8: User: Tell me the weather in Dubai.\nTurn 9: User: Find flights from Dubai to Tokyo.\nTurn 10: User: What are the best attractions in Tokyo?\nTurn 11: User: What's the weather like in Tokyo?\nTurn 12: User: Based on all the weather information across all cities, recommend what I should pack for this trip."
+      }
+    ]
+  },
+  "8": {
+    "scenario": 8,
+    "name": "Code debugging (multi-turn)",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 4096
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. run_test(test_name: str) - runs a test suite and returns the output\n2. read_file(path: str) - returns the content of a source file\n3. search_code(query: str) - searches codebase for relevant code snippets\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: I have a bug in my Python project. The test_calculator test suite is failing. Can you run the test to see what's wrong?\nTurn 2: User: The test shows a failure. Can you read the calculator.py source code to understand the implementation?\nTurn 3: User: I see the issue might be in the divide method. Can you search the codebase for 'divide' to find all related code?\nTurn 4: User: Can you also read the test_calculator.py file to see what's expected?\nTurn 5: User: Now that you have all the information, please explain the bug and suggest a fix."
+      }
+    ]
+  },
+  "9": {
+    "scenario": 9,
+    "name": "Cross-reference analysis (multi-turn)",
+    "type": "conversation",
+    "api_call": {
+      "model": "gpt-4o-mini (or any OpenAI-compatible model)",
+      "temperature": 0.0,
+      "max_tokens": 4096
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.\n\nAvailable tools:\n1. search_attractions(city: str) - returns top attractions in the city\n2. get_weather(city: str) - returns current weather\n3. get_flight_info(origin: str, destination: str) - returns flight options\n\nWrite a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.\n\nCRITICAL — Your chain-of-thought must include THREE elements for each tool call:\n1. INTENT: Why you need this tool and what you expect to find\n2. <<NODE:N>>: The tool call marker (result will be inserted here)\n3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?\n\nIMPORTANT RULES:\n- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.\n- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.\n- Call each tool exactly once with correct arguments.\n- Be precise with argument values (city names lowercase, no spaces: \"newyork\", \"losangeles\").\n- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.\n- For conversational turns without tools, include natural reasoning without node markers.\n- If a result seems incomplete or problematic, note that and explain what it means for the answer.\n- End with a synthesis that connects all evaluated results into a coherent answer plan.\n\nOUTPUT FORMAT — respond with a single JSON object, nothing else:\n{\n  \"chain_of_thought\": \"Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.\",\n  \"nodes\": {\n    \"1\": {\"tool\": \"search_attractions\", \"arguments\": {\"city\": \"paris\"}},\n    \"2\": {\"tool\": \"get_weather\", \"arguments\": {\"city\": \"paris\"}}\n  }\n}"
+      },
+      {
+        "role": "user",
+        "content": "Turn 1: User: I want to compare travel options between Paris, Rome, and London. What are the top attractions in Paris?\nTurn 2: User: What's the weather like in Paris?\nTurn 3: User: Now tell me about attractions in Rome.\nTurn 4: User: How's the weather in Rome?\nTurn 5: User: What about attractions in London?\nTurn 6: User: And the weather in London?\nTurn 7: User: Find me flights from Paris to Rome.\nTurn 8: User: How about flights from Rome to London?\nTurn 9: User: And flights from Paris to London?\nTurn 10: User: Now please give me a comprehensive comparison of the three cities as travel destinations."
+      }
+    ]
+  }
+}
