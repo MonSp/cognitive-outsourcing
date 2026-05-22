@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced SIG Benchmark — 9 Scenarios.
+Enhanced SIG Benchmark — 9 Scenarios + R3 Cross-Architecture Analysis.
 Compares App Loop (traditional) vs SIG across diverse real-world patterns:
 
   App Loop: Model generates tool call → STOP → app executes tool → full re-prefill → continue
@@ -9,150 +9,46 @@ Compares App Loop (traditional) vs SIG across diverse real-world patterns:
   Scenario 1-6: Multi-turn conversation patterns
   Scenario 7-9: Single-task chain-of-thought patterns (SIG's core advantage)
 
-Requires: pip install llama-cpp-python pynvml
+  R3 Task: Cross-architecture SIG analysis (Transformer, SSM, RWKV, xLSTM, Hybrid)
+           Pure numpy simulation — no model loading needed.
+
+Requires: pip install llama-cpp-python pynvml  (baseline task only)
+          pip install numpy                     (R3 task)
 """
 
-import time, json, argparse, warnings, re
+import time, json, argparse, re
 from typing import List, Dict, Optional, Tuple
-from llama_cpp import Llama
 
 try:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        import pynvml
-    PYNVML_AVAILABLE = True
+    from llama_cpp import Llama
+    LLAMA_AVAILABLE = True
 except ImportError:
-    PYNVML_AVAILABLE = False
+    LLAMA_AVAILABLE = False
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+
+try:
+    import r3_beyond_transformer as r3
+    R3_AVAILABLE = True
+except ImportError:
+    R3_AVAILABLE = False
+
+from core import (
+    MeaningCompiler, InjectionEngine, ToolRegistry, GPUMonitor,
+    normalize_city, CITY_ALIASES,
+    SYSTEM_PROMPT as CORE_SYSTEM_PROMPT,
+    SYSTEM_PROMPT_DEV as CORE_SYSTEM_PROMPT_DEV,
+    TOOL_DESCRIPTIONS_TRAVEL, TOOL_DESCRIPTIONS_DEV,
+    SIG_ANSWER_REMINDER,
+    init_metrics, extract_key_facts, evaluate_answer_quality,
+    average_metrics as core_average_metrics,
+)
 
 SEQ_ID = 0
-
-CITY_ALIASES = {
-    "ny": "newyork", "new york": "newyork", "new york city": "newyork",
-    "la": "losangeles", "sf": "sanfrancisco",
-    "lv": "lasvegas", "dc": "washington",
-}
-
-
-def normalize_city(s: str) -> str:
-    return CITY_ALIASES.get(s.strip().lower().replace(" ", ""), s.strip().lower().replace(" ", ""))
-
-
-class GPUMonitor:
-    def __init__(self):
-        self.handle = None
-        self.baseline_mb = 0.0
-        self.total_mb = 0.0
-        self.enabled = False
-        if not PYNVML_AVAILABLE:
-            return
-        try:
-            pynvml.nvmlInit()
-            self.handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            self.enabled = True
-            info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
-            self.total_mb = info.total / (1024 ** 2)
-            self.baseline_mb = info.used / (1024 ** 2)
-            name = pynvml.nvmlDeviceGetName(self.handle)
-            if isinstance(name, bytes):
-                name = name.decode()
-            print(f"[GPU] {name}, Total {self.total_mb:.0f} MB, Baseline {self.baseline_mb:.0f} MB")
-        except Exception as e:
-            print(f"[GPU] Init failed: {e}")
-
-    def snapshot(self):
-        if not self.enabled:
-            return {"used_mb": 0.0, "delta_mb": 0.0}
-        info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
-        used = info.used / (1024 ** 2)
-        return {"used_mb": used, "delta_mb": used - self.baseline_mb}
-
-    def shutdown(self):
-        if self.enabled:
-            pynvml.nvmlShutdown()
-
-
-TOOL_REGISTRY = {
-    "search_attractions": {
-        "paris": "1. Eiffel Tower (330m). 2. Louvre (Mona Lisa). 3. Notre-Dame. 4. Montmartre. 5. Seine Cruise.",
-        "rome": "1. Colosseum. 2. Vatican City. 3. Trevi Fountain. 4. Roman Forum. 5. Pantheon.",
-        "tokyo": "1. Senso-ji. 2. Shibuya Crossing. 3. Meiji Shrine. 4. Akihabara. 5. Tokyo Skytree.",
-        "london": "1. British Museum. 2. Tower of London. 3. London Eye. 4. Buckingham Palace. 5. Big Ben.",
-        "newyork": "1. Statue of Liberty. 2. Central Park. 3. Empire State Building. 4. Times Square. 5. Broadway.",
-        "sydney": "1. Opera House. 2. Harbour Bridge. 3. Bondi Beach. 4. Taronga Zoo. 5. The Rocks.",
-        "beijing": "1. Great Wall. 2. Forbidden City. 3. Temple of Heaven. 4. Summer Palace. 5. Tiananmen Square.",
-        "dubai": "1. Burj Khalifa. 2. Palm Jumeirah. 3. Dubai Mall. 4. Dubai Marina. 5. Jumeirah Beach.",
-    },
-    "get_weather": {
-        "paris": "Partly cloudy, 18C",
-        "rome": "Sunny, 26C",
-        "tokyo": "Rain, 22C",
-        "london": "Overcast, 15C",
-        "newyork": "Clear, 22C",
-        "sydney": "Sunny, 24C",
-        "beijing": "Smog, 28C",
-        "dubai": "Hot, 38C",
-    },
-    "get_flight_info": {
-        "paris_rome": "Direct: Air France AF1104 (2h10m, $180)",
-        "paris_tokyo": "Direct: Air France AF276 (11h40m, $850)",
-        "rome_tokyo": "Connecting via Istanbul (15h, $720)",
-        "london_paris": "Eurostar train (2h20m, $120) or flights",
-        "newyork_london": "Direct: BA178 (7h, $600)",
-        "sydney_tokyo": "Direct: JQ26 (9h, $450)",
-        "beijing_dubai": "Direct: EK307 (8h, $700)",
-        "newyork_tokyo": "Direct: JL5 (13h, $900)",
-        "london_dubai": "Direct: EK1 (7h, $650)",
-        "paris_newyork": "Direct: AF8 (8h30m, $550)",
-        "dubai_tokyo": "Direct: EK318 (9h30m, $800)",
-    },
-    "read_file": {
-        "calculator.py": "class Calculator:\n    def __init__(self):\n        self.history = []\n    def add(self, a, b):\n        result = a + b\n        self.history.append(f'{a}+{b}={result}')\n        return result\n    def subtract(self, a, b):\n        result = a - b\n        self.history.append(f'{a}-{b}={result}')\n        return result\n    def multiply(self, a, b):\n        result = a * b\n        self.history.append(f'{a}*{b}={result}')\n        return result\n    def divide(self, a, b):\n        result = a / b\n        self.history.append(f'{a}/{b}={result}')\n        return result\n    def power(self, a, b):\n        result = a ** b\n        self.history.append(f'{a}**{b}={result}')\n        return result",
-        "test_calculator.py": "import unittest\nfrom calculator import Calculator\n\nclass TestCalculator(unittest.TestCase):\n    def setUp(self):\n        self.calc = Calculator()\n    def test_add(self):\n        self.assertEqual(self.calc.add(2, 3), 5)\n    def test_subtract(self):\n        self.assertEqual(self.calc.subtract(5, 3), 2)\n    def test_multiply(self):\n        self.assertEqual(self.calc.multiply(4, 3), 12)\n    def test_divide(self):\n        self.assertEqual(self.calc.divide(10, 2), 5)\n    def test_divide_by_zero(self):\n        with self.assertRaises(ZeroDivisionError):\n            self.calc.divide(10, 0)\n    def test_power(self):\n        self.assertEqual(self.calc.power(2, 3), 8)\n    def test_history(self):\n        self.calc.add(1, 2)\n        self.calc.multiply(3, 4)\n        self.assertEqual(len(self.calc.history), 2)",
-        "auth.py": "import hashlib\nimport secrets\n\nclass AuthManager:\n    def __init__(self):\n        self.users = {}\n    def register(self, username, password):\n        salt = secrets.token_hex(16)\n        hashed = hashlib.sha256((password + salt).encode()).hexdigest()\n        self.users[username] = {'salt': salt, 'hash': hashed}\n        return True\n    def login(self, username, password):\n        if username not in self.users:\n            return False\n        user = self.users[username]\n        hashed = hashlib.sha256((password + user['salt']).encode()).hexdigest()\n        return hashed == user['hash']\n    def change_password(self, username, old_pw, new_pw):\n        if not self.login(username, old_pw):\n            return False\n        salt = secrets.token_hex(16)\n        hashed = hashlib.sha256((new_pw + salt).encode()).hexdigest()\n        self.users[username] = {'salt': salt, 'hash': hashed}\n        return True",
-        "config.py": "import json\nimport os\n\nCONFIG_PATH = '/etc/app/config.json'\nDEFAULT_CONFIG = {\n    'debug': False,\n    'port': 8080,\n    'database': {'host': 'localhost', 'port': 5432, 'name': 'app_db'},\n    'cache': {'enabled': True, 'ttl': 3600},\n    'logging': {'level': 'INFO', 'file': '/var/log/app.log'}\n}\n\ndef load_config():\n    if os.path.exists(CONFIG_PATH):\n        with open(CONFIG_PATH) as f:\n            return json.load(f)\n    return DEFAULT_CONFIG.copy()\n\ndef get_db_url(config=None):\n    cfg = config or load_config()\n    db = cfg['database']\n    return f\"postgresql://{db['host']}:{db['port']}/{db['name']}\"",
-        "api.py": "from flask import Flask, jsonify, request\nfrom auth import AuthManager\nfrom config import load_config\n\napp = Flask(__name__)\nauth = AuthManager()\nconfig = load_config()\n\n@app.route('/api/register', methods=['POST'])\ndef register():\n    data = request.json\n    return jsonify({'success': auth.register(data['username'], data['password'])})\n\n@app.route('/api/login', methods=['POST'])\ndef login():\n    data = request.json\n    return jsonify({'success': auth.login(data['username'], data['password'])})\n\n@app.route('/api/config', methods=['GET'])\ndef get_config():\n    return jsonify(config)\n\n@app.route('/api/health', methods=['GET'])\ndef health():\n    return jsonify({'status': 'ok', 'debug': config.get('debug', False)})",
-    },
-    "search_code": {
-        "divide": "Found in calculator.py line 14: def divide(self, a, b): result = a / b  -- NOTE: No zero-division check!",
-        "login": "Found in auth.py line 12: def login(self, username, password): -- Uses SHA256 with salt",
-        "config": "Found in config.py: DEFAULT_CONFIG with database, cache, logging settings",
-        "register": "Found in auth.py line 7: def register(self, username, password): -- Stores salt+hash",
-        "api_route": "Found in api.py: Routes /api/register, /api/login, /api/config, /api/health",
-        "database": "Found in config.py: database.host=localhost, database.port=5432, database.name=app_db",
-        "error_handling": "No try/except blocks found in any file. Missing error handling in divide() and API routes.",
-        "test": "Found in test_calculator.py: 7 test cases covering add, subtract, multiply, divide, divide_by_zero, power, history",
-    },
-    "run_test": {
-        "test_calculator": "FAILED: test_divide_by_zero - Expected ZeroDivisionError but got 5.0 (divide(10,0) returned inf instead of raising)\nPASSED: test_add - 2+3=5\nPASSED: test_subtract - 5-3=2\nPASSED: test_multiply - 4*3=12\nPASSED: test_divide - 10/2=5\nPASSED: test_power - 2**3=8\nPASSED: test_history\n1 FAILED, 6 PASSED out of 7 tests",
-        "test_auth": "PASSED: test_register\nPASSED: test_login_success\nPASSED: test_login_wrong_password\nPASSED: test_change_password\n4 PASSED out of 4 tests",
-        "test_api": "FAILED: test_health_endpoint - Expected status=ok, got 500 Internal Server Error\nFAILED: test_config_endpoint - Missing 'cache' key in response\nPASSED: test_register_endpoint\nPASSED: test_login_endpoint\n2 FAILED, 2 PASSED out of 4 tests",
-        "test_all": "TOTAL: 3 FAILED, 12 PASSED out of 15 tests\nFailures: test_divide_by_zero, test_health_endpoint, test_config_endpoint",
-    },
-}
-
-
-def execute_tool(name: str, args: dict) -> str:
-    if name == "search_attractions":
-        key = args.get("city", "").strip().lower()
-        return TOOL_REGISTRY["search_attractions"].get(key, f"No data for {key}")
-    elif name == "get_weather":
-        key = args.get("city", "").strip().lower()
-        return TOOL_REGISTRY["get_weather"].get(key, f"No data for {key}")
-    elif name == "get_flight_info":
-        o = args.get("origin", "").strip().lower()
-        d = args.get("destination", "").strip().lower()
-        return TOOL_REGISTRY["get_flight_info"].get(f"{o}_{d}", f"No flights between {o} and {d}")
-    elif name == "read_file":
-        key = args.get("path", args.get("file", "")).strip()
-        return TOOL_REGISTRY["read_file"].get(key, f"File not found: {key}")
-    elif name == "search_code":
-        key = args.get("query", "").strip().lower()
-        return TOOL_REGISTRY["search_code"].get(key, f"No results for '{key}'")
-    elif name == "run_test":
-        key = args.get("test_name", args.get("name", "")).strip()
-        return TOOL_REGISTRY["run_test"].get(key, f"Test not found: {key}")
-    return f"Unknown tool: {name}"
-
 
 SYSTEM_PROMPT = """You are a helpful travel assistant with access to these tools:
 
@@ -220,6 +116,12 @@ The Forbidden City is a palace complex in Dongcheng District, Beijing. It served
 
 Tokyo Skytree is a broadcasting and observation tower in Sumida, Tokyo. It became the tallest structure in Japan in 2010 and reached its full height of 634 m in March 2011.
 """
+
+_tool_registry = ToolRegistry()
+
+
+def execute_tool(name: str, args: dict) -> str:
+    return _tool_registry.execute(name, args)
 
 
 class EnhancedLlamaBench:
@@ -1035,9 +937,98 @@ def print_mode_result(mode: str, met: Dict):
           f"prefill: {met['total_prefill_tokens']:.0f} | GPU: {met['peak_gpu_delta']:.0f} MB{chain_str}{correct_str}")
 
 
+# ================================================================
+# R3: SIG Beyond Transformer — Cross-Architecture Benchmark
+# ================================================================
+
+def run_task_r3(args, gpu: GPUMonitor):
+    np.random.seed(42)
+    d_model = args.r3_d_model
+    n_heads = args.r3_n_heads
+    n_layers = args.r3_n_layers
+    n_injections = args.r3_n_injections
+
+    print("\n" + "=" * 80)
+    print("R3: SIG Beyond Transformer — Cross-Architecture Benchmark")
+    print(f"  d_model={d_model}, n_heads={n_heads}, n_layers={n_layers}, "
+          f"n_injections={n_injections}")
+    print("=" * 80)
+
+    models = {
+        "Transformer": r3.TransformerStateModel(
+            d_model=d_model, n_heads=n_heads, n_layers=n_layers, max_seq_len=2048
+        ),
+        "SSM/Mamba": r3.SSMStateModel(r3.SSMConfig(
+            d_model=d_model, d_state=16, n_layers=n_layers
+        )),
+        "RWKV": r3.RWKVStateModel(r3.RWKVConfig(
+            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
+            head_size=d_model // n_heads
+        )),
+        "xLSTM": r3.xLSTMStateModel(r3.xLSTMConfig(
+            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
+            head_dim=d_model // n_heads, block_type="mixed"
+        )),
+    }
+
+    inject_data = np.random.randn(32).astype(np.float32)
+
+    all_results = {}
+
+    all_results["retention"] = r3.benchmark_information_retention(
+        models, inject_data, n_injections)
+
+    all_results["strategies"] = r3.benchmark_injection_strategies(
+        models, inject_data)
+
+    all_results["capacity"] = r3.benchmark_state_capacity(models)
+
+    all_results["latency"] = r3.benchmark_latency(models, inject_data)
+
+    all_results["ssm_bottleneck"] = r3.benchmark_ssm_bottleneck(
+        d_model=d_model, n_layers=n_layers)
+
+    all_results["rwkv_decay"] = r3.benchmark_rwkv_decay(
+        d_model=d_model, n_layers=n_layers)
+
+    all_results["xlstm_mlstm"] = r3.benchmark_xlstm_mlstm(
+        d_model=d_model, n_layers=n_layers)
+
+    all_results["hybrid"] = r3.benchmark_hybrid(d_model=d_model)
+
+    models2 = {
+        "Transformer": r3.TransformerStateModel(
+            d_model=d_model, n_heads=n_heads, n_layers=n_layers, max_seq_len=2048
+        ),
+        "SSM/Mamba": r3.SSMStateModel(r3.SSMConfig(
+            d_model=d_model, d_state=16, n_layers=n_layers
+        )),
+        "RWKV": r3.RWKVStateModel(r3.RWKVConfig(
+            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
+            head_size=d_model // n_heads
+        )),
+        "xLSTM": r3.xLSTMStateModel(r3.xLSTMConfig(
+            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
+            head_dim=d_model // n_heads, block_type="mixed"
+        )),
+    }
+    all_results["cross_arch"] = r3.benchmark_cross_architecture(
+        models2, inject_data, n_injections)
+
+    summary = r3.generate_summary(all_results)
+    print("\n" + summary)
+
+    if gpu.enabled:
+        snap = gpu.snapshot()
+        print(f"\nGPU (during R3): Used {snap['used_mb']:.0f} MB, Delta {snap['delta_mb']:+.0f} MB")
+
+    print("\nR3 task complete.")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Enhanced SIG Benchmark — 9 Scenarios")
-    parser.add_argument("--model", required=True, help="Path to GGUF model")
+    parser = argparse.ArgumentParser(description="Enhanced SIG Benchmark — 9 Scenarios + R3")
+    parser.add_argument("--model", default="",
+                        help="Path to GGUF model (required for baseline task)")
     parser.add_argument("--n-ctx", type=int, default=16384)
     parser.add_argument("--n-threads", type=int, default=4)
     parser.add_argument("--n-gpu-layers", type=int, default=0)
@@ -1046,344 +1037,382 @@ def main():
     parser.add_argument("--no-debug", action="store_true", help="Disable debug output")
     parser.add_argument("--runs", type=int, default=10, help="Number of runs per mode per scenario (default: 10)")
     parser.add_argument("--skip", type=str, default="", help="Comma-separated scenario numbers to skip (e.g. '3,5')")
+    parser.add_argument("--task", default="baseline",
+                        choices=["baseline", "r3", "all"],
+                        help="Which test task to run")
+    parser.add_argument("--r3-n-injections", type=int, default=5,
+                        help="Number of SIG injections for R3 benchmark")
+    parser.add_argument("--r3-d-model", type=int, default=512,
+                        help="Model dimension for R3 architecture simulation")
+    parser.add_argument("--r3-n-heads", type=int, default=8,
+                        help="Number of attention heads for R3 simulation")
+    parser.add_argument("--r3-n-layers", type=int, default=6,
+                        help="Number of layers for R3 architecture simulation")
     args = parser.parse_args()
     args.debug = not args.no_debug
     skip = set(int(x.strip()) for x in args.skip.split(",") if x.strip())
 
     gpu = GPUMonitor()
-    bench = EnhancedLlamaBench(args.model, n_ctx=args.n_ctx, n_threads=args.n_threads,
-                               n_gpu_layers=args.n_gpu_layers)
-
-    all_results = {}
-    n_runs = args.runs
-
-    def run_multi_turns(mode, turns, system_prompt=SYSTEM_PROMPT, gpu=gpu, debug=args.debug):
-        correct_runs = []
-        all_tool_ok = []
-        all_runs = []
-        for ri in range(n_runs):
-            met = bench.run_mode_on_turns(mode, turns, system_prompt=system_prompt,
-                                          gpu=gpu, debug=debug)
-            ok = met["tool_calls_ok"]
-            total = met["total_tool_calls"]
-            all_tool_ok.append(f"{ok}/{total}")
-            all_runs.append(met)
-            if ok == total and total > 0:
-                correct_runs.append(met)
-        print(f"     {mode}: runs={n_runs}, tool_acc=[{', '.join(all_tool_ok)}], correct={len(correct_runs)}/{n_runs}")
-        if correct_runs:
-            return average_metrics(correct_runs)
-        best = max(all_runs, key=lambda m: m["tool_calls_ok"])
-        best["correct_runs"] = 0
-        print(f"     WARNING: No fully correct run for {mode}, using best effort ({best['tool_calls_ok']}/{best['total_tool_calls']})")
-        return best
-
-    def run_multi_complex(mode, query, chain, system_prompt=SYSTEM_PROMPT, gpu=gpu, debug=args.debug):
-        correct_runs = []
-        all_tool_ok = []
-        all_runs = []
-        for ri in range(n_runs):
-            met = bench.run_complex_task(mode, query, chain,
-                                         system_prompt=system_prompt, gpu=gpu, debug=debug)
-            ok = met["tool_calls_ok"]
-            total = met["total_tool_calls"]
-            all_tool_ok.append(f"{ok}/{total}")
-            all_runs.append(met)
-            if ok == total and total > 0:
-                correct_runs.append(met)
-        print(f"     {mode}: runs={n_runs}, tool_acc=[{', '.join(all_tool_ok)}], correct={len(correct_runs)}/{n_runs}")
-        if correct_runs:
-            return average_metrics(correct_runs)
-        best = max(all_runs, key=lambda m: m["tool_calls_ok"])
-        best["correct_runs"] = 0
-        print(f"     WARNING: No fully correct run for {mode}, using best effort ({best['tool_calls_ok']}/{best['total_tool_calls']})")
-        return best
 
     # ================================================================
-    # Scenario 1: Long-sequence stress test
+    # Baseline task: App Loop vs SIG (9 scenarios)
     # ================================================================
-    if 1 not in skip:
-        print_scenario_header(1, "Long-sequence stress test",
-                              "20+ turns, context grows to 4K+ tokens. Tests cumulative KV cache advantage.")
-        turns = bench.build_scenario1_long_sequence(args.long_turns)
-        print(f"   {len(turns)} turns generated, {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_turns(mode, turns)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[1] = results
+    if args.task in ("baseline", "all"):
+        if not args.model:
+            print("ERROR: --model is required for baseline task")
+            if args.task == "baseline":
+                gpu.shutdown()
+                return
+        elif not LLAMA_AVAILABLE:
+            print("ERROR: llama-cpp-python is required for baseline task. Install with: pip install llama-cpp-python")
+            if args.task == "baseline":
+                gpu.shutdown()
+                return
+        else:
+            bench = EnhancedLlamaBench(args.model, n_ctx=args.n_ctx, n_threads=args.n_threads,
+                                       n_gpu_layers=args.n_gpu_layers)
+
+            all_results = {}
+            n_runs = args.runs
+
+            def run_multi_turns(mode, turns, system_prompt=SYSTEM_PROMPT, gpu=gpu, debug=args.debug):
+                correct_runs = []
+                all_tool_ok = []
+                all_runs = []
+                for ri in range(n_runs):
+                    met = bench.run_mode_on_turns(mode, turns, system_prompt=system_prompt,
+                                                  gpu=gpu, debug=debug)
+                    ok = met["tool_calls_ok"]
+                    total = met["total_tool_calls"]
+                    all_tool_ok.append(f"{ok}/{total}")
+                    all_runs.append(met)
+                    if ok == total and total > 0:
+                        correct_runs.append(met)
+                print(f"     {mode}: runs={n_runs}, tool_acc=[{', '.join(all_tool_ok)}], correct={len(correct_runs)}/{n_runs}")
+                if correct_runs:
+                    return average_metrics(correct_runs)
+                best = max(all_runs, key=lambda m: m["tool_calls_ok"])
+                best["correct_runs"] = 0
+                print(f"     WARNING: No fully correct run for {mode}, using best effort ({best['tool_calls_ok']}/{best['total_tool_calls']})")
+                return best
+
+            def run_multi_complex(mode, query, chain, system_prompt=SYSTEM_PROMPT, gpu=gpu, debug=args.debug):
+                correct_runs = []
+                all_tool_ok = []
+                all_runs = []
+                for ri in range(n_runs):
+                    met = bench.run_complex_task(mode, query, chain,
+                                                 system_prompt=system_prompt, gpu=gpu, debug=debug)
+                    ok = met["tool_calls_ok"]
+                    total = met["total_tool_calls"]
+                    all_tool_ok.append(f"{ok}/{total}")
+                    all_runs.append(met)
+                    if ok == total and total > 0:
+                        correct_runs.append(met)
+                print(f"     {mode}: runs={n_runs}, tool_acc=[{', '.join(all_tool_ok)}], correct={len(correct_runs)}/{n_runs}")
+                if correct_runs:
+                    return average_metrics(correct_runs)
+                best = max(all_runs, key=lambda m: m["tool_calls_ok"])
+                best["correct_runs"] = 0
+                print(f"     WARNING: No fully correct run for {mode}, using best effort ({best['tool_calls_ok']}/{best['total_tool_calls']})")
+                return best
+
+            # ================================================================
+            # Scenario 1: Long-sequence stress test
+            # ================================================================
+            if 1 not in skip:
+                print_scenario_header(1, "Long-sequence stress test",
+                                      "20+ turns, context grows to 4K+ tokens. Tests cumulative KV cache advantage.")
+                turns = bench.build_scenario1_long_sequence(args.long_turns)
+                print(f"   {len(turns)} turns generated, {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_turns(mode, turns)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[1] = results
+
+            # ================================================================
+            # Scenario 2: Multi-tool chain (complex reasoning)
+            # ================================================================
+            if 2 not in skip:
+                print_scenario_header(2, "Multi-tool chain (complex reasoning)",
+                                      "One complex query requiring 4 sequential tool calls + summary. "
+                                      "Tests SIG's ability to chain without re-prefilling.")
+                turns = bench.build_scenario2_multi_tool_chain()
+                print(f"   {len(turns)} turns (4 tool calls + 1 summary), {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_turns(mode, turns)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[2] = results
+
+            # ================================================================
+            # Scenario 3: Rapid-fire short queries
+            # ================================================================
+            if 3 not in skip:
+                print_scenario_header(3, "Rapid-fire short queries",
+                                      "Many independent short queries, each needing 1 tool call. "
+                                      "Tests overhead of cache reset vs continuous generation.")
+                turns = bench.build_scenario3_rapid_fire(args.rapid_queries)
+                print(f"   {len(turns)} short queries, {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_turns(mode, turns)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[3] = results
+
+            # ================================================================
+            # Scenario 4: Long-document + tool calls
+            # ================================================================
+            if 4 not in skip:
+                print_scenario_header(4, "Long-document + tool calls",
+                                      "Large background text (~1K tokens) injected, then tool calls on top. "
+                                      "Tests SIG advantage when prefix is very long (expensive to re-prefill).")
+                system_with_doc, turns = bench.build_scenario4_long_document()
+                init_tokens = len(bench.tok(f"{system_with_doc}\n\nUser: test\nAssistant:", add_bos=False))
+                print(f"   System prompt + background: ~{init_tokens} tokens, {len(turns)} turns, {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_turns(mode, turns, system_prompt=system_with_doc)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[4] = results
+
+            # ================================================================
+            # Scenario 5: Mixed conversation (tool + chitchat)
+            # ================================================================
+            if 5 not in skip:
+                print_scenario_header(5, "Mixed conversation (tool + chitchat)",
+                                      "Alternating between tool calls and plain conversation. "
+                                      "Tests SIG handling of turns that don't need tools.")
+                turns = bench.build_scenario5_mixed_conversation()
+                tool_count = sum(1 for t in turns if t.get("tool"))
+                chat_count = len(turns) - tool_count
+                print(f"   {len(turns)} turns ({tool_count} tool, {chat_count} chitchat), {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_turns(mode, turns)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[5] = results
+
+            # ================================================================
+            # Scenario 6: Deep tool chain (8+ tool calls)
+            # ================================================================
+            if 6 not in skip:
+                print_scenario_header(6, "Deep tool chain (round-the-world)",
+                                      "15 turns with 14 sequential tool calls across 5 cities. "
+                                      "Tests SIG's sustained advantage with many chained tool calls.")
+                turns = bench.build_scenario6_deep_tool_chain()
+                tool_count = sum(1 for t in turns if t.get("tool"))
+                chat_count = len(turns) - tool_count
+                print(f"   {len(turns)} turns ({tool_count} tool, {chat_count} summary), {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_turns(mode, turns)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[6] = results
+
+            # ================================================================
+            # Scenario 7: Complex task - Travel planning chain
+            # ================================================================
+            if 7 not in skip:
+                print_scenario_header(7, "Complex task: Travel planning chain",
+                                      "Single complex query requiring 11 autonomous tool calls. "
+                                      "Model must chain: attractions→weather→flights for 4 cities. "
+                                      "Tests SIG's core advantage: uninterrupted reasoning chain.")
+                query, chain = bench.build_scenario7_travel_planning_chain()
+                print(f"   1 query, {len(chain)} expected tool calls in chain, {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_complex(mode, query, chain)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[7] = results
+
+            # ================================================================
+            # Scenario 8: Complex task - Code debugging chain
+            # ================================================================
+            if 8 not in skip:
+                print_scenario_header(8, "Complex task: Code debugging chain",
+                                      "Programming agent: run tests → read code → search code → read tests. "
+                                      "Tests SIG in a coding agent scenario where each step depends on previous results.")
+                query, chain = bench.build_scenario8_code_debugging_chain()
+                print(f"   1 query, {len(chain)} expected tool calls in chain, {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_complex(mode, query, chain,
+                                            system_prompt=SYSTEM_PROMPT_DEV)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[8] = results
+
+            # ================================================================
+            # Scenario 9: Complex task - Cross-reference analysis
+            # ================================================================
+            if 9 not in skip:
+                print_scenario_header(9, "Complex task: Cross-reference analysis",
+                                      "Compare 3 cities: attractions+weather for each, then all flight pairs. "
+                                      "9 tool calls requiring cross-referencing results. "
+                                      "Tests SIG's ability to maintain context across many tool results.")
+                query, chain = bench.build_scenario9_cross_reference_chain()
+                print(f"   1 query, {len(chain)} expected tool calls in chain, {n_runs} runs per mode")
+                results = {}
+                for mode in ["app_loop", "sig"]:
+                    met = run_multi_complex(mode, query, chain)
+                    print_mode_result(mode, met)
+                    results[mode] = met
+                all_results[9] = results
+
+            # ================================================================
+            # Summary
+            # ================================================================
+            print("\n" + "=" * 80)
+            print("=== Cross-Scenario Summary ===")
+            print("=" * 80)
+
+            print("\n--- Speed (Generation TTF) ---")
+            header = f"{'Scenario':<14} {'App Loop':<12} {'SIG':<12} {'Speedup':<10}"
+            print(header)
+            print("-" * len(header))
+            scenario_names = {
+                1: "Long-seq",
+                2: "Multi-tool",
+                3: "Rapid-fire",
+                4: "Long-doc",
+                5: "Mixed",
+                6: "Deep-chain",
+                7: "Travel-plan",
+                8: "Code-debug",
+                9: "Cross-ref",
+            }
+            for snum, results in sorted(all_results.items()):
+                t_app = results.get("app_loop", {}).get("total_ttf", 0)
+                t_sig = results.get("sig", {}).get("total_ttf", 0)
+                sp = f"{t_app/t_sig:.2f}x" if t_sig > 0 else "N/A"
+                name = scenario_names.get(snum, f"S{snum}")
+                print(f"{name:<14} {t_app:<12.2f} {t_sig:<12.2f} {sp:<10}")
+
+            print("\n--- Tool Accuracy (avg of correct runs) ---")
+            header2 = f"{'Scenario':<14} {'App Loop':<24} {'SIG':<24}"
+            print(header2)
+            print("-" * len(header2))
+            for snum, results in sorted(all_results.items()):
+                name = scenario_names.get(snum, f"S{snum}")
+                row = f"{name:<14}"
+                for mode in ["app_loop", "sig"]:
+                    m = results.get(mode, {})
+                    ok = m.get("tool_calls_ok", 0)
+                    total = m.get("total_tool_calls", 0)
+                    pct = f"{100*ok/total:.0f}%" if total > 0 else "N/A"
+                    cr = m.get("correct_runs", "")
+                    cr_str = f"[{cr}/{n_runs}]" if cr != "" else ""
+                    row += f" {ok:.0f}/{total:.0f} ({pct:>4}) {cr_str:<8}"
+                print(row)
+
+            print("\n--- Prefill Cost (tokens) ---")
+            header3 = f"{'Scenario':<14} {'Full Prefill':<14} {'Delta Prefill':<14} {'SIG Prefill':<14} {'Cache Save':<12} {'SIG Save':<12}"
+            print(header3)
+            print("-" * len(header3))
+            for snum, results in sorted(all_results.items()):
+                name = scenario_names.get(snum, f"S{snum}")
+                pf_full = results.get("app_loop", {}).get("total_prefill_tokens", 0)
+                pf_delta = results.get("app_loop", {}).get("delta_prefill_tokens", 0)
+                pf_sig = results.get("sig", {}).get("total_prefill_tokens", 0)
+                cache_save = f"{(pf_full-pf_delta)/pf_full*100:.0f}%" if pf_full > 0 else "N/A"
+                sig_save = f"{(pf_full-pf_sig)/pf_full*100:.0f}%" if pf_full > 0 else "N/A"
+                print(f"{name:<14} {pf_full:<14.0f} {pf_delta:<14.0f} {pf_sig:<14.0f} {cache_save:<12} {sig_save:<12}")
+
+            print("\n--- Prefill Cost (time, seconds) ---")
+            header4 = f"{'Scenario':<14} {'Full Prefill':<14} {'Delta Prefill':<14} {'SIG Prefill':<14} {'Cache Save':<12} {'SIG Save':<12}"
+            print(header4)
+            print("-" * len(header4))
+            for snum, results in sorted(all_results.items()):
+                name = scenario_names.get(snum, f"S{snum}")
+                pf_full_t = results.get("app_loop", {}).get("total_prefill_time", 0)
+                pf_delta_t = results.get("app_loop", {}).get("delta_prefill_time_est", 0)
+                pf_sig_t = results.get("sig", {}).get("total_prefill_time", 0)
+                cache_save_t = f"{(pf_full_t-pf_delta_t)/pf_full_t*100:.0f}%" if pf_full_t > 0 else "N/A"
+                sig_save_t = f"{(pf_full_t-pf_sig_t)/pf_full_t*100:.0f}%" if pf_full_t > 0 else "N/A"
+                print(f"{name:<14} {pf_full_t:<14.2f} {pf_delta_t:<14.2f} {pf_sig_t:<14.2f} {cache_save_t:<12} {sig_save_t:<12}")
+
+            print("\n--- Total Time (Generation + Prefill) ---")
+            header5 = f"{'Scenario':<14} {'App Loop':<12} {'+Cache':<12} {'SIG':<12} {'Cache Spd':<12} {'SIG Spd':<12}"
+            print(header5)
+            print("-" * len(header5))
+            for snum, results in sorted(all_results.items()):
+                name = scenario_names.get(snum, f"S{snum}")
+                gen_app = results.get("app_loop", {}).get("total_ttf", 0)
+                pf_full_t = results.get("app_loop", {}).get("total_prefill_time", 0)
+                pf_delta_t = results.get("app_loop", {}).get("delta_prefill_time_est", 0)
+                gen_sig = results.get("sig", {}).get("total_ttf", 0)
+                pf_sig_t = results.get("sig", {}).get("total_prefill_time", 0)
+                total_app = gen_app + pf_full_t
+                total_cache = gen_app + pf_delta_t
+                total_sig = gen_sig + pf_sig_t
+                cache_spd = f"{total_app/total_cache:.2f}x" if total_cache > 0 else "N/A"
+                sig_spd = f"{total_app/total_sig:.2f}x" if total_sig > 0 else "N/A"
+                print(f"{name:<14} {total_app:<12.2f} {total_cache:<12.2f} {total_sig:<12.2f} {cache_spd:<12} {sig_spd:<12}")
+
+            print("\n--- SIG Stability ---")
+            header6 = f"{'Scenario':<14} {'Rollbacks':<12} {'SIG GPU MB':<12}"
+            print(header6)
+            print("-" * len(header6))
+            for snum, results in sorted(all_results.items()):
+                name = scenario_names.get(snum, f"S{snum}")
+                sig_rb = results.get("sig", {}).get("rollback_count", 0)
+                sig_gpu = results.get("sig", {}).get("peak_gpu_delta", 0)
+                print(f"{name:<14} {sig_rb:<12} {sig_gpu:<12.0f}")
+
+            has_chain = any(
+                results.get("app_loop", {}).get("chain_depth", 0) > 0
+                or results.get("sig", {}).get("chain_depth", 0) > 0
+                for results in all_results.values()
+            )
+            if has_chain:
+                print("\n--- Chain Completion (complex tasks) ---")
+                header7 = f"{'Scenario':<14} {'App Loop':<20} {'SIG':<24} {'SIG Advantage':<14}"
+                print(header7)
+                print("-" * len(header7))
+                for snum, results in sorted(all_results.items()):
+                    name = scenario_names.get(snum, f"S{snum}")
+                    app_d = results.get("app_loop", {}).get("chain_depth", 0)
+                    app_t = results.get("app_loop", {}).get("chain_total", 0)
+                    sig_d = results.get("sig", {}).get("chain_depth", 0)
+                    sig_t = results.get("sig", {}).get("chain_total", 0)
+                    sig_syn = results.get("sig", {}).get("synthetic_injections", 0)
+                    if app_t == 0 and sig_t == 0:
+                        continue
+                    app_str = f"{app_d:.0f}/{app_t}" if app_t > 0 else "N/A"
+                    sig_str = f"{sig_d:.0f}/{sig_t}" if sig_t > 0 else "N/A"
+                    if sig_syn > 0:
+                        sig_str += f" (syn:{sig_syn:.0f})"
+                    if app_t > 0 and sig_t > 0:
+                        app_pct = app_d / app_t
+                        sig_pct = sig_d / sig_t
+                        adv = f"{sig_pct - app_pct:+.0%}"
+                    else:
+                        adv = "N/A"
+                    print(f"{name:<14} {app_str:<20} {sig_str:<24} {adv:<14}")
+
+            if gpu.enabled:
+                final_snap = gpu.snapshot()
+                print(f"\nGPU Final: Used {final_snap['used_mb']:.0f} MB, Delta {final_snap['delta_mb']:+.0f} MB")
 
     # ================================================================
-    # Scenario 2: Multi-tool chain (complex reasoning)
+    # R3 task: SIG Beyond Transformer (cross-architecture analysis)
     # ================================================================
-    if 2 not in skip:
-        print_scenario_header(2, "Multi-tool chain (complex reasoning)",
-                              "One complex query requiring 4 sequential tool calls + summary. "
-                              "Tests SIG's ability to chain without re-prefilling.")
-        turns = bench.build_scenario2_multi_tool_chain()
-        print(f"   {len(turns)} turns (4 tool calls + 1 summary), {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_turns(mode, turns)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[2] = results
-
-    # ================================================================
-    # Scenario 3: Rapid-fire short queries
-    # ================================================================
-    if 3 not in skip:
-        print_scenario_header(3, "Rapid-fire short queries",
-                              "Many independent short queries, each needing 1 tool call. "
-                              "Tests overhead of cache reset vs continuous generation.")
-        turns = bench.build_scenario3_rapid_fire(args.rapid_queries)
-        print(f"   {len(turns)} short queries, {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_turns(mode, turns)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[3] = results
-
-    # ================================================================
-    # Scenario 4: Long-document + tool calls
-    # ================================================================
-    if 4 not in skip:
-        print_scenario_header(4, "Long-document + tool calls",
-                              "Large background text (~1K tokens) injected, then tool calls on top. "
-                              "Tests SIG advantage when prefix is very long (expensive to re-prefill).")
-        system_with_doc, turns = bench.build_scenario4_long_document()
-        init_tokens = len(bench.tok(f"{system_with_doc}\n\nUser: test\nAssistant:", add_bos=False))
-        print(f"   System prompt + background: ~{init_tokens} tokens, {len(turns)} turns, {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_turns(mode, turns, system_prompt=system_with_doc)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[4] = results
-
-    # ================================================================
-    # Scenario 5: Mixed conversation (tool + chitchat)
-    # ================================================================
-    if 5 not in skip:
-        print_scenario_header(5, "Mixed conversation (tool + chitchat)",
-                              "Alternating between tool calls and plain conversation. "
-                              "Tests SIG handling of turns that don't need tools.")
-        turns = bench.build_scenario5_mixed_conversation()
-        tool_count = sum(1 for t in turns if t.get("tool"))
-        chat_count = len(turns) - tool_count
-        print(f"   {len(turns)} turns ({tool_count} tool, {chat_count} chitchat), {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_turns(mode, turns)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[5] = results
-
-    # ================================================================
-    # Scenario 6: Deep tool chain (8+ tool calls)
-    # ================================================================
-    if 6 not in skip:
-        print_scenario_header(6, "Deep tool chain (round-the-world)",
-                              "15 turns with 14 sequential tool calls across 5 cities. "
-                              "Tests SIG's sustained advantage with many chained tool calls.")
-        turns = bench.build_scenario6_deep_tool_chain()
-        tool_count = sum(1 for t in turns if t.get("tool"))
-        chat_count = len(turns) - tool_count
-        print(f"   {len(turns)} turns ({tool_count} tool, {chat_count} summary), {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_turns(mode, turns)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[6] = results
-
-    # ================================================================
-    # Scenario 7: Complex task - Travel planning chain
-    # ================================================================
-    if 7 not in skip:
-        print_scenario_header(7, "Complex task: Travel planning chain",
-                              "Single complex query requiring 11 autonomous tool calls. "
-                              "Model must chain: attractions→weather→flights for 4 cities. "
-                              "Tests SIG's core advantage: uninterrupted reasoning chain.")
-        query, chain = bench.build_scenario7_travel_planning_chain()
-        print(f"   1 query, {len(chain)} expected tool calls in chain, {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_complex(mode, query, chain)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[7] = results
-
-    # ================================================================
-    # Scenario 8: Complex task - Code debugging chain
-    # ================================================================
-    if 8 not in skip:
-        print_scenario_header(8, "Complex task: Code debugging chain",
-                              "Programming agent: run tests → read code → search code → read tests. "
-                              "Tests SIG in a coding agent scenario where each step depends on previous results.")
-        query, chain = bench.build_scenario8_code_debugging_chain()
-        print(f"   1 query, {len(chain)} expected tool calls in chain, {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_complex(mode, query, chain,
-                                    system_prompt=SYSTEM_PROMPT_DEV)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[8] = results
-
-    # ================================================================
-    # Scenario 9: Complex task - Cross-reference analysis
-    # ================================================================
-    if 9 not in skip:
-        print_scenario_header(9, "Complex task: Cross-reference analysis",
-                              "Compare 3 cities: attractions+weather for each, then all flight pairs. "
-                              "9 tool calls requiring cross-referencing results. "
-                              "Tests SIG's ability to maintain context across many tool results.")
-        query, chain = bench.build_scenario9_cross_reference_chain()
-        print(f"   1 query, {len(chain)} expected tool calls in chain, {n_runs} runs per mode")
-        results = {}
-        for mode in ["app_loop", "sig"]:
-            met = run_multi_complex(mode, query, chain)
-            print_mode_result(mode, met)
-            results[mode] = met
-        all_results[9] = results
-
-    # ================================================================
-    # Summary
-    # ================================================================
-    print("\n" + "=" * 80)
-    print("=== Cross-Scenario Summary ===")
-    print("=" * 80)
-
-    print("\n--- Speed (Generation TTF) ---")
-    header = f"{'Scenario':<14} {'App Loop':<12} {'SIG':<12} {'Speedup':<10}"
-    print(header)
-    print("-" * len(header))
-    scenario_names = {
-        1: "Long-seq",
-        2: "Multi-tool",
-        3: "Rapid-fire",
-        4: "Long-doc",
-        5: "Mixed",
-        6: "Deep-chain",
-        7: "Travel-plan",
-        8: "Code-debug",
-        9: "Cross-ref",
-    }
-    for snum, results in sorted(all_results.items()):
-        t_app = results.get("app_loop", {}).get("total_ttf", 0)
-        t_sig = results.get("sig", {}).get("total_ttf", 0)
-        sp = f"{t_app/t_sig:.2f}x" if t_sig > 0 else "N/A"
-        name = scenario_names.get(snum, f"S{snum}")
-        print(f"{name:<14} {t_app:<12.2f} {t_sig:<12.2f} {sp:<10}")
-
-    print("\n--- Tool Accuracy (avg of correct runs) ---")
-    header2 = f"{'Scenario':<14} {'App Loop':<24} {'SIG':<24}"
-    print(header2)
-    print("-" * len(header2))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        row = f"{name:<14}"
-        for mode in ["app_loop", "sig"]:
-            m = results.get(mode, {})
-            ok = m.get("tool_calls_ok", 0)
-            total = m.get("total_tool_calls", 0)
-            pct = f"{100*ok/total:.0f}%" if total > 0 else "N/A"
-            cr = m.get("correct_runs", "")
-            cr_str = f"[{cr}/{n_runs}]" if cr != "" else ""
-            row += f" {ok:.0f}/{total:.0f} ({pct:>4}) {cr_str:<8}"
-        print(row)
-
-    print("\n--- Prefill Cost (tokens) ---")
-    header3 = f"{'Scenario':<14} {'Full Prefill':<14} {'Delta Prefill':<14} {'SIG Prefill':<14} {'Cache Save':<12} {'SIG Save':<12}"
-    print(header3)
-    print("-" * len(header3))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        pf_full = results.get("app_loop", {}).get("total_prefill_tokens", 0)
-        pf_delta = results.get("app_loop", {}).get("delta_prefill_tokens", 0)
-        pf_sig = results.get("sig", {}).get("total_prefill_tokens", 0)
-        cache_save = f"{(pf_full-pf_delta)/pf_full*100:.0f}%" if pf_full > 0 else "N/A"
-        sig_save = f"{(pf_full-pf_sig)/pf_full*100:.0f}%" if pf_full > 0 else "N/A"
-        print(f"{name:<14} {pf_full:<14.0f} {pf_delta:<14.0f} {pf_sig:<14.0f} {cache_save:<12} {sig_save:<12}")
-
-    print("\n--- Prefill Cost (time, seconds) ---")
-    header4 = f"{'Scenario':<14} {'Full Prefill':<14} {'Delta Prefill':<14} {'SIG Prefill':<14} {'Cache Save':<12} {'SIG Save':<12}"
-    print(header4)
-    print("-" * len(header4))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        pf_full_t = results.get("app_loop", {}).get("total_prefill_time", 0)
-        pf_delta_t = results.get("app_loop", {}).get("delta_prefill_time_est", 0)
-        pf_sig_t = results.get("sig", {}).get("total_prefill_time", 0)
-        cache_save_t = f"{(pf_full_t-pf_delta_t)/pf_full_t*100:.0f}%" if pf_full_t > 0 else "N/A"
-        sig_save_t = f"{(pf_full_t-pf_sig_t)/pf_full_t*100:.0f}%" if pf_full_t > 0 else "N/A"
-        print(f"{name:<14} {pf_full_t:<14.2f} {pf_delta_t:<14.2f} {pf_sig_t:<14.2f} {cache_save_t:<12} {sig_save_t:<12}")
-
-    print("\n--- Total Time (Generation + Prefill) ---")
-    header5 = f"{'Scenario':<14} {'App Loop':<12} {'+Cache':<12} {'SIG':<12} {'Cache Spd':<12} {'SIG Spd':<12}"
-    print(header5)
-    print("-" * len(header5))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        gen_app = results.get("app_loop", {}).get("total_ttf", 0)
-        pf_full_t = results.get("app_loop", {}).get("total_prefill_time", 0)
-        pf_delta_t = results.get("app_loop", {}).get("delta_prefill_time_est", 0)
-        gen_sig = results.get("sig", {}).get("total_ttf", 0)
-        pf_sig_t = results.get("sig", {}).get("total_prefill_time", 0)
-        total_app = gen_app + pf_full_t
-        total_cache = gen_app + pf_delta_t
-        total_sig = gen_sig + pf_sig_t
-        cache_spd = f"{total_app/total_cache:.2f}x" if total_cache > 0 else "N/A"
-        sig_spd = f"{total_app/total_sig:.2f}x" if total_sig > 0 else "N/A"
-        print(f"{name:<14} {total_app:<12.2f} {total_cache:<12.2f} {total_sig:<12.2f} {cache_spd:<12} {sig_spd:<12}")
-
-    print("\n--- SIG Stability ---")
-    header6 = f"{'Scenario':<14} {'Rollbacks':<12} {'SIG GPU MB':<12}"
-    print(header6)
-    print("-" * len(header6))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        sig_rb = results.get("sig", {}).get("rollback_count", 0)
-        sig_gpu = results.get("sig", {}).get("peak_gpu_delta", 0)
-        print(f"{name:<14} {sig_rb:<12} {sig_gpu:<12.0f}")
-
-    has_chain = any(
-        results.get("app_loop", {}).get("chain_depth", 0) > 0
-        or results.get("sig", {}).get("chain_depth", 0) > 0
-        for results in all_results.values()
-    )
-    if has_chain:
-        print("\n--- Chain Completion (complex tasks) ---")
-        header7 = f"{'Scenario':<14} {'App Loop':<20} {'SIG':<24} {'SIG Advantage':<14}"
-        print(header7)
-        print("-" * len(header7))
-        for snum, results in sorted(all_results.items()):
-            name = scenario_names.get(snum, f"S{snum}")
-            app_d = results.get("app_loop", {}).get("chain_depth", 0)
-            app_t = results.get("app_loop", {}).get("chain_total", 0)
-            sig_d = results.get("sig", {}).get("chain_depth", 0)
-            sig_t = results.get("sig", {}).get("chain_total", 0)
-            sig_syn = results.get("sig", {}).get("synthetic_injections", 0)
-            if app_t == 0 and sig_t == 0:
-                continue
-            app_str = f"{app_d:.0f}/{app_t}" if app_t > 0 else "N/A"
-            sig_str = f"{sig_d:.0f}/{sig_t}" if sig_t > 0 else "N/A"
-            if sig_syn > 0:
-                sig_str += f" (syn:{sig_syn:.0f})"
-            if app_t > 0 and sig_t > 0:
-                app_pct = app_d / app_t
-                sig_pct = sig_d / sig_t
-                adv = f"{sig_pct - app_pct:+.0%}"
-            else:
-                adv = "N/A"
-            print(f"{name:<14} {app_str:<20} {sig_str:<24} {adv:<14}")
-
-    if gpu.enabled:
-        final_snap = gpu.snapshot()
-        print(f"\nGPU Final: Used {final_snap['used_mb']:.0f} MB, Delta {final_snap['delta_mb']:+.0f} MB")
+    if args.task in ("r3", "all"):
+        if not NUMPY_AVAILABLE:
+            print("ERROR: numpy is required for R3 task. Install with: pip install numpy")
+        elif not R3_AVAILABLE:
+            print("ERROR: r3_beyond_transformer module not available")
+        else:
+            run_task_r3(args, gpu)
 
     gpu.shutdown()
     print("\nBenchmark complete.")

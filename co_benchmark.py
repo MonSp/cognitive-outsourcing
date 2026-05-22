@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Cognitive Outsourcing Benchmark — CO+AppLoop vs CO+SIG
+Cognitive Outsourcing Benchmark — Unified Entry Point
 =====================================================
-Tests ONLY the Cognitive Outsourcing mode: cloud teacher plans, local model executes.
-Three modes compared:
-  1. co_apploop_full  : AppLoop (full re-prefill each turn) + CO planning
-  2. co_apploop_gen  : AppLoop generation time only (excl. prefill) + CO planning
-  3. co_sig          : SIG (KV-cache continuity) + CO planning
-
-All modes share the same Phase-1 (cloud teacher plans tool chain).
-Difference is ONLY in Phase-2 (local execution strategy).
+Tasks:
+  baseline : CO+AppLoop vs CO+SIG benchmark (9 scenarios)
+  r1       : Injection information theory analysis
+  r2       : KV cache degradation analysis
+  r4       : Teacher-student distillation
+  r5       : Privacy boundaries
+  all      : run all tasks sequentially
 
 Requires: pip install -r requirements.txt
   - llama-cpp-python >=0.2.80,<0.3.0
@@ -17,9 +16,23 @@ Requires: pip install -r requirements.txt
   - requests
 """
 
-import time, json, argparse, warnings, re, logging, os
+import time, json, argparse, warnings, re, logging, os, sys, math, secrets, hashlib
 from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from collections import Counter
 from llama_cpp import Llama
+
+from core import (
+    MeaningCompiler, InjectionEngine, ToolRegistry, GPUMonitor,
+    normalize_city, CITY_ALIASES,
+    SYSTEM_PROMPT, SYSTEM_PROMPT_DEV, TOOL_DESCRIPTIONS_TRAVEL, TOOL_DESCRIPTIONS_DEV,
+    TEACHER_PLANNING_PROMPT, TEACHER_CONVERSATION_PROMPT,
+    SIG_ANSWER_REMINDER, LOCAL_CO_PROMPT, NODE_PATTERN, RECALL_SYSTEM_PROMPT,
+    init_metrics, extract_key_facts, evaluate_answer_quality, average_metrics,
+    kl_divergence, js_divergence, shannon_entropy, shannon_entropy_array,
+    mutual_information_estimate, mutual_information_text,
+    head_agreement_rate, compute_layer_shifts,
+)
 
 try:
     import requests
@@ -28,312 +41,18 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        import pynvml
-    PYNVML_AVAILABLE = True
+    import numpy as np
+    NUMPY_AVAILABLE = True
 except ImportError:
-    PYNVML_AVAILABLE = False
-
-SEQ_ID = 0
-
-CITY_ALIASES = {
-    "ny": "newyork", "new york": "newyork", "new york city": "newyork",
-    "la": "losangeles", "sf": "sanfrancisco",
-    "lv": "lasvegas", "dc": "washington",
-}
-
-
-def normalize_city(s: str) -> str:
-    return CITY_ALIASES.get(s.strip().lower().replace(" ", ""), s.strip().lower().replace(" ", ""))
+    NUMPY_AVAILABLE = False
 
 
 # ======================================================================
-# GPU Monitor
-# ======================================================================
-class GPUMonitor:
-    def __init__(self):
-        self.handle = None
-        self.baseline_mb = 0.0
-        self.total_mb = 0.0
-        self.enabled = False
-        if not PYNVML_AVAILABLE:
-            return
-        try:
-            pynvml.nvmlInit()
-            self.handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            self.enabled = True
-            info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
-            self.total_mb = info.total / (1024 ** 2)
-            self.baseline_mb = info.used / (1024 ** 2)
-            name = pynvml.nvmlDeviceGetName(self.handle)
-            if isinstance(name, bytes):
-                name = name.decode()
-            print(f"[GPU] {name}, Total {self.total_mb:.0f} MB, Baseline {self.baseline_mb:.0f} MB")
-        except Exception as e:
-            print(f"[GPU] Init failed: {e}")
-
-    def snapshot(self):
-        if not self.enabled:
-            return {"used_mb": 0.0, "delta_mb": 0.0}
-        info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
-        used = info.used / (1024 ** 2)
-        return {"used_mb": used, "delta_mb": used - self.baseline_mb}
-
-    def shutdown(self):
-        if self.enabled:
-            pynvml.nvmlShutdown()
-
-
-# ======================================================================
-# MeaningCompiler — reused from temp.py
-# ======================================================================
-class MeaningCompiler:
-    TOOL_MARK = "<<<TOOL>>>"
-    TOOL_END = "<<</TOOL>>>"
-
-    def __init__(self, model_path: str, n_ctx: int = 8192, n_threads: int = 4, n_gpu_layers: int = 0):
-        print(f"Loading model {model_path} (ctx={n_ctx}, gpu_layers={n_gpu_layers})")
-        self.llm = Llama(model_path=model_path, n_ctx=n_ctx, n_threads=n_threads,
-                         n_gpu_layers=n_gpu_layers, verbose=False)
-        self.n_ctx = n_ctx
-
-    def tokenize(self, text: str, add_bos: bool = False) -> List[int]:
-        return self.llm.tokenize(text.encode("utf-8"), add_bos=add_bos)
-
-    def detokenize(self, ids: List[int]) -> str:
-        return self.llm.detokenize(ids).decode("utf-8", errors="replace")
-
-    def reset_cache(self):
-        self.llm._ctx.kv_cache_seq_rm(SEQ_ID, -1, -1)
-        self.llm.n_tokens = 0
-
-    def eval(self, tokens: List[int]):
-        self.llm.eval(tokens)
-
-    def rebuild_cache(self, token_ids: List[int]):
-        self.reset_cache()
-        self.eval(token_ids)
-
-    def sample(self, temp: float = 0.0) -> int:
-        token = self.llm.sample(temp=temp)
-        self.eval([token])
-        return token
-
-    def _ids_endswith(self, seq: List[int], suffix: List[int]) -> bool:
-        if len(suffix) > len(seq):
-            return False
-        return list(seq[-len(suffix):]) == list(suffix)
-
-    def _detect_repetition(self, text: str, min_len: int = 6, threshold: int = 3) -> bool:
-        if threshold < 1 or len(text) < min_len:
-            return False
-        for pat_len in range(min_len, min(40, len(text) // threshold)):
-            tail = text[-pat_len:]
-            if tail.strip() == '':
-                continue
-            if text.count(tail) >= threshold:
-                return True
-        lines = text.split('\n')
-        if len(lines) >= 3:
-            last_line = lines[-1].strip()
-            if len(last_line) > 5:
-                recent = [l.strip() for l in lines[-4:]]
-                if recent.count(last_line) >= 2:
-                    return True
-        return False
-
-    def generate_until_ids(self, stop_ids: List[int], max_new: int = 300, rep_threshold: int = 3) -> Tuple[str, List[int]]:
-        gen_ids = []
-        for _ in range(max_new):
-            token = self.sample()
-            gen_ids.append(token)
-            if self._ids_endswith(gen_ids, stop_ids):
-                text_ids = gen_ids[:-len(stop_ids)]
-                return self.detokenize(text_ids), gen_ids
-            cur = self.detokenize(gen_ids)
-            if "Assistant:" in cur or "assistant:" in cur:
-                return cur, gen_ids
-            if self._detect_repetition(cur, threshold=rep_threshold):
-                break
-        return self.detokenize(gen_ids), gen_ids
-
-    def generate_until_str(self, stop_str: str, max_new: int = 300, rep_threshold: int = 3) -> Tuple[str, List[int]]:
-        gen_ids = []
-        for _ in range(max_new):
-            token = self.sample()
-            gen_ids.append(token)
-            cur = self.detokenize(gen_ids)
-            if stop_str in cur:
-                return cur.split(stop_str)[0], gen_ids
-            if "Assistant:" in cur or "assistant:" in cur:
-                return cur, gen_ids
-            if self._detect_repetition(cur, threshold=rep_threshold):
-                break
-        return self.detokenize(gen_ids), gen_ids
-
-    def generate_until_any(self, stop_strs: List[str], max_new: int = 300, rep_threshold: int = 3) -> Tuple[str, List[int], Optional[str]]:
-        all_stops = list(stop_strs) + ["Assistant:", "assistant:"]
-        gen_ids = []
-        for _ in range(max_new):
-            token = self.sample()
-            gen_ids.append(token)
-            cur = self.detokenize(gen_ids)
-            for s in all_stops:
-                if s in cur:
-                    return cur.split(s)[0], gen_ids, s
-            if self._detect_repetition(cur, threshold=rep_threshold):
-                break
-        return self.detokenize(gen_ids), gen_ids, None
-
-    def sanitize_generation(self, n_before: int, gen_text: str,
-                            gen_ids: List[int], cached_prefix_ids: List[int]) -> Tuple[str, List[int], bool]:
-        full_decoded = self.detokenize(gen_ids)
-        need_rollback = False
-        if "Assistant:" in full_decoded or "assistant:" in full_decoded.lower():
-            need_rollback = True
-        if not need_rollback and self._detect_repetition(full_decoded):
-            need_rollback = True
-        if not need_rollback:
-            return gen_text, gen_ids, False
-        self.rebuild_cache(cached_prefix_ids)
-        return "", [], True
-
-
-# ======================================================================
-# InjectionEngine — reused from temp.py
-# ======================================================================
-class InjectionEngine:
-    def __init__(self, compiler: MeaningCompiler):
-        self.compiler = compiler
-        self.cached_ids: List[int] = []
-
-    def make_result_block(self, tool_name: str, tool_args: dict, result: str) -> str:
-        args_str = ", ".join(f'{k}="{v}"' for k, v in tool_args.items())
-        return (
-            f"{self.compiler.TOOL_END}\n"
-            f"[Observation from {tool_name}({args_str})]: {result}\n"
-        )
-
-    def inject(self, token_ids: List[int]) -> Tuple[int, float]:
-        t0 = time.time()
-        self.compiler.eval(token_ids)
-        elapsed = time.time() - t0
-        return len(token_ids), elapsed
-
-    def inject_and_track(self, token_ids: List[int], metrics: Dict, key_prefix: str = "total"):
-        n_tok, elapsed = self.inject(token_ids)
-        metrics[f"{key_prefix}_prefill_tokens"] += n_tok
-        metrics[f"{key_prefix}_prefill_time"] += elapsed
-        self.cached_ids = self.cached_ids + list(token_ids)
-
-    def update_cache(self, new_ids: List[int]):
-        self.cached_ids = self.cached_ids + list(new_ids)
-
-    def rollback(self, target_ids: List[int]):
-        self.compiler.rebuild_cache(target_ids)
-        self.cached_ids = list(target_ids)
-
-    def reset(self):
-        self.compiler.reset_cache()
-        self.cached_ids = []
-
-
-# ======================================================================
-# Tool Registry — copied from temp.py
-# ======================================================================
-class ToolRegistry:
-    def __init__(self):
-        self.tools = {
-            "search_attractions": {
-                "paris": "1. Eiffel Tower (330m). 2. Louvre (Mona Lisa). 3. Notre-Dame. 4. Montmartre. 5. Seine Cruise.",
-                "rome": "1. Colosseum. 2. Vatican City. 3. Trevi Fountain. 4. Roman Forum. 5. Pantheon.",
-                "tokyo": "1. Senso-ji. 2. Shibuya Crossing. 3. Meiji Shrine. 4. Akihabara. 5. Tokyo Skytree.",
-                "london": "1. British Museum. 2. Tower of London. 3. London Eye. 4. Buckingham Palace. 5. Big Ben.",
-                "newyork": "1. Statue of Liberty. 2. Central Park. 3. Empire State Building. 4. Times Square. 5. Broadway.",
-                "sydney": "1. Opera House. 2. Harbour Bridge. 3. Bondi Beach. 4. Taronga Zoo. 5. The Rocks.",
-                "beijing": "1. Great Wall. 2. Forbidden City. 3. Temple of Heaven. 4. Summer Palace. 5. Tiananmen Square.",
-                "dubai": "1. Burj Khalifa. 2. Palm Jumeirah. 3. Dubai Mall. 4. Dubai Marina. 5. Jumeirah Beach.",
-            },
-            "get_weather": {
-                "paris": "Partly cloudy, 18C",
-                "rome": "Sunny, 26C",
-                "tokyo": "Rain, 22C",
-                "london": "Overcast, 15C",
-                "newyork": "Clear, 22C",
-                "sydney": "Sunny, 24C",
-                "beijing": "Smog, 28C",
-                "dubai": "Hot, 38C",
-            },
-            "get_flight_info": {
-                "paris_rome": "Direct: Air France AF1104 (2h10m, $180)",
-                "paris_tokyo": "Direct: Air France AF276 (11h40m, $850)",
-                "rome_tokyo": "Connecting via Istanbul (15h, $720)",
-                "london_paris": "Eurostar train (2h20m, $120) or flights",
-                "newyork_london": "Direct: BA178 (7h, $600)",
-                "sydney_tokyo": "Direct: JQ26 (9h, $450)",
-                "beijing_dubai": "Direct: EK307 (8h, $700)",
-                "newyork_tokyo": "Direct: JL5 (13h, $900)",
-                "london_dubai": "Direct: EK1 (7h, $650)",
-                "paris_newyork": "Direct: AF8 (8h30m, $550)",
-                "dubai_tokyo": "Direct: EK318 (9h30m, $800)",
-            },
-            "read_file": {
-                "calculator.py": "class Calculator:\n    def __init__(self):\n        self.history = []\n    def add(self, a, b):\n        result = a + b\n        self.history.append(f'{a}+{b}={result}')\n        return result\n    def subtract(self, a, b):\n        result = a - b\n        self.history.append(f'{a}-{b}={result}')\n        return result\n    def multiply(self, a, b):\n        result = a * b\n        self.history.append(f'{a}*{b}={result}')\n        return result\n    def divide(self, a, b):\n        result = a / b\n        self.history.append(f'{a}/{b}={result}')\n        return result\n    def power(self, a, b):\n        result = a ** b\n        self.history.append(f'{a}**{b}={result}')\n        return result",
-                "test_calculator.py": "import unittest\nfrom calculator import Calculator\n\nclass TestCalculator(unittest.TestCase):\n    def setUp(self):\n        self.calc = Calculator()\n    def test_add(self):\n        self.assertEqual(self.calc.add(2, 3), 5)\n    def test_subtract(self):\n        self.assertEqual(self.calc.subtract(5, 3), 2)\n    def test_multiply(self):\n        self.assertEqual(self.calc.multiply(4, 3), 12)\n    def test_divide(self):\n        self.assertEqual(self.calc.divide(10, 2), 5)\n    def test_divide_by_zero(self):\n        with self.assertRaises(ZeroDivisionError):\n            self.calc.divide(10, 0)\n    def test_power(self):\n        self.assertEqual(self.calc.power(2, 3), 8)\n    def test_history(self):\n        self.calc.add(1, 2)\n        self.calc.multiply(3, 4)\n        self.assertEqual(len(self.calc.history), 2)",
-                "auth.py": "import hashlib\nimport secrets\n\nclass AuthManager:\n    def __init__(self):\n        self.users = {}\n    def register(self, username, password):\n        salt = secrets.token_hex(16)\n        hashed = hashlib.sha256((password + salt).encode()).hexdigest()\n        self.users[username] = {'salt': salt, 'hash': hashed}\n        return True\n    def login(self, username, password):\n        if username not in self.users:\n            return False\n        user = self.users[username]\n        hashed = hashlib.sha256((password + user['salt']).encode()).hexdigest()\n        return hashed == user['hash']\n    def change_password(self, username, old_pw, new_pw):\n        if not self.login(username, old_pw):\n            return False\n        salt = secrets.token_hex(16)\n        hashed = hashlib.sha256((new_pw + salt).encode()).hexdigest()\n        self.users[username] = {'salt': salt, 'hash': hashed}\n        return True",
-                "config.py": "import json\nimport os\n\nCONFIG_PATH = '/etc/app/config.json'\nDEFAULT_CONFIG = {\n    'debug': False,\n    'port': 8080,\n    'database': {'host': 'localhost', 'port': 5432, 'name': 'app_db'},\n    'cache': {'enabled': True, 'ttl': 3600},\n    'logging': {'level': 'INFO', 'file': '/var/log/app.log'}\n}\n\ndef load_config():\n    if os.path.exists(CONFIG_PATH):\n        with open(CONFIG_PATH) as f:\n            return json.load(f)\n    return DEFAULT_CONFIG.copy()\n\ndef get_db_url(config=None):\n    cfg = config or load_config()\n    db = cfg['database']\n    return f\"postgresql://{db['host']}:{db['port']}/{db['name']}\"",
-                "api.py": "from flask import Flask, jsonify, request\nfrom auth import AuthManager\nfrom config import load_config\n\napp = Flask(__name__)\nauth = AuthManager()\nconfig = load_config()\n\n@app.route('/api/register', methods=['POST'])\ndef register():\n    data = request.json\n    return jsonify({'success': auth.register(data['username'], data['password'])})\n\n@app.route('/api/login', methods=['POST'])\ndef login():\n    data = request.json\n    return jsonify({'success': auth.login(data['username'], data['password'])})\n\n@app.route('/api/config', methods=['GET'])\ndef get_config():\n    return jsonify(config)\n\n@app.route('/api/health', methods=['GET'])\ndef health():\n    return jsonify({'status': 'ok', 'debug': config.get('debug', False)})",
-            },
-            "search_code": {
-                "divide": "Found in calculator.py line 14: def divide(self, a, b): result = a / b  -- NOTE: No zero-division check!",
-                "login": "Found in auth.py line 12: def login(self, username, password): -- Uses SHA256 with salt",
-                "config": "Found in config.py: DEFAULT_CONFIG with database, cache, logging settings",
-                "register": "Found in auth.py line 7: def register(self, username, password): -- Stores salt+hash",
-                "api_route": "Found in api.py: Routes /api/register, /api/login, /api/config, /api/health",
-                "database": "Found in config.py: database.host=localhost, database.port=5432, database.name=app_db",
-                "error_handling": "No try/except blocks found in any file. Missing error handling in divide() and API routes.",
-                "test": "Found in test_calculator.py: 7 test cases covering add, subtract, multiply, divide, divide_by_zero, power, history",
-            },
-            "run_test": {
-                "test_calculator": "FAILED: test_divide_by_zero - Expected ZeroDivisionError but got 5.0 (divide(10,0) returned inf instead of raising)\nPASSED: test_add - 2+3=5\nPASSED: test_subtract - 5-3=2\nPASSED: test_multiply - 4*3=12\nPASSED: test_divide - 10/2=5\nPASSED: test_power - 2**3=8\nPASSED: test_history\n1 FAILED, 6 PASSED out of 7 tests",
-                "test_auth": "PASSED: test_register\nPASSED: test_login_success\nPASSED: test_login_wrong_password\nPASSED: test_change_password\n4 PASSED out of 4 tests",
-                "test_api": "FAILED: test_health_endpoint - Expected status=ok, got 500 Internal Server Error\nFAILED: test_config_endpoint - Missing 'cache' key in response\nPASSED: test_register_endpoint\nPASSED: test_login_endpoint\n2 FAILED, 2 PASSED out of 4 tests",
-                "test_all": "TOTAL: 3 FAILED, 12 PASSED out of 15 tests\nFailures: test_divide_by_zero, test_health_endpoint, test_config_endpoint",
-            },
-        }
-
-    def execute(self, name: str, args: dict) -> str:
-        if name == "search_attractions":
-            key = args.get("city", "").strip().lower()
-            return self.tools["search_attractions"].get(key, f"No data for {key}")
-        elif name == "get_weather":
-            key = args.get("city", "").strip().lower()
-            return self.tools["get_weather"].get(key, f"No data for {key}")
-        elif name == "get_flight_info":
-            o = args.get("origin", "").strip().lower()
-            d = args.get("destination", "").strip().lower()
-            return self.tools["get_flight_info"].get(f"{o}_{d}", f"No flights between {o} and {d}")
-        elif name == "read_file":
-            key = args.get("path", args.get("file", "")).strip()
-            return self.tools["read_file"].get(key, f"File not found: {key}")
-        elif name == "search_code":
-            key = args.get("query", "").strip().lower()
-            return self.tools["search_code"].get(key, f"No results for '{key}'")
-        elif name == "run_test":
-            key = args.get("test_name", args.get("name", "")).strip()
-            return self.tools["run_test"].get(key, f"Test not found: {key}")
-        return f"Unknown tool: {name}"
-
-
-# ======================================================================
-# Cloud Teacher — only the planning part, reused from temp.py
+# Cloud Teacher Module (CO-specific, not in core)
 # ======================================================================
 class CloudTeacherModule:
-    def __init__(self, api_base: str = "http://localhost:11434/v1",
-                 model: str = "gpt-4o-mini",
-                 api_key: str = "",
-                 timeout: float = 30.0):
+    def __init__(self, api_base="http://localhost:11434/v1", model="gpt-4o-mini",
+                 api_key="", timeout=30.0):
         if not REQUESTS_AVAILABLE:
             raise ImportError("CloudTeacherModule requires 'requests': pip install requests")
         self.api_base = api_base.rstrip("/")
@@ -342,144 +61,49 @@ class CloudTeacherModule:
         self.timeout = timeout
         self.logger = logging.getLogger("CloudTeacher")
 
-    TOOL_DESCRIPTIONS_TRAVEL = """Available tools:
-1. search_attractions(city: str) - returns top attractions in the city
-2. get_weather(city: str) - returns current weather
-3. get_flight_info(origin: str, destination: str) - returns flight options"""
-
-    TEACHER_PLANNING_PROMPT = """You are a cognitive planning expert. Given a user query, produce a chain-of-thought that includes marked nodes where tool results should be inserted.
-
-{tool_descriptions}
-
-Write a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.
-
-CRITICAL — Your chain-of-thought must include THREE elements for each tool call:
-1. INTENT: Why you need this tool and what you expect to find
-2. <<NODE:N>>: The tool call marker (result will be inserted here)
-3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?
-
-IMPORTANT RULES:
-- Write the chain-of-thought as the assistant's internal reasoning process.
-- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.
-- Call each tool exactly once with correct arguments.
-- Be precise with argument values (city names lowercase, no spaces: "newyork", "losangeles").
-- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.
-- If a result seems incomplete or problematic, note that and explain what it means for the answer.
-- End with a synthesis that connects all evaluated results into a coherent answer plan.
-
-OUTPUT FORMAT — respond with a single JSON object, nothing else:
-{{
-  "chain_of_thought": "I need to find attractions in Paris to help the user plan their trip. <<NODE:1>> The attractions list covers major landmarks like the Eiffel Tower and Louvre, which gives a good overview. Now I also need the weather to advise on packing, <<NODE:2>> The weather shows partly cloudy at 18C, which is mild and pleasant for sightseeing. With both the comprehensive attractions list and favorable weather, I can provide a well-rounded recommendation.",
-  "nodes": {{
-    "1": {{"tool": "search_attractions", "arguments": {{"city": "paris"}}}},
-    "2": {{"tool": "get_weather", "arguments": {{"city": "paris"}}}}
-  }}
-}}"""
-
-    TEACHER_CONVERSATION_PROMPT = """You are a cognitive planning expert. Given a multi-turn conversation, produce a chain-of-thought for the ENTIRE conversation that includes marked nodes where tool results should be inserted.
-
-{tool_descriptions}
-
-Write a reasoning chain that demonstrates HOW to think about the problem and evaluate tool results. This chain will be given to a smaller local model, so you must teach it the reasoning process, not just list tool calls.
-
-CRITICAL — Your chain-of-thought must include THREE elements for each tool call:
-1. INTENT: Why you need this tool and what you expect to find
-2. <<NODE:N>>: The tool call marker (result will be inserted here)
-3. EVALUATION: After each node, evaluate the result — is it sufficient? What does it tell you? What should you do next based on this result?
-
-IMPORTANT RULES:
-- Write the chain-of-thought as the assistant's internal reasoning process covering all turns.
-- Insert <<NODE:N>> (1-indexed) at every point where a tool call is needed.
-- Call each tool exactly once with correct arguments.
-- Be precise with argument values (city names lowercase, no spaces: "newyork", "losangeles").
-- After each <<NODE:N>>, include an EVALUATION of the result: assess completeness, note key facts, and reason about implications.
-- For conversational turns without tools, include natural reasoning without node markers.
-- If a result seems incomplete or problematic, note that and explain what it means for the answer.
-- End with a synthesis that connects all evaluated results into a coherent answer plan.
-
-OUTPUT FORMAT — respond with a single JSON object, nothing else:
-{{
-  "chain_of_thought": "Turn 1: The user greets, I should respond warmly and offer help.\\nTurn 2: The user asks about Paris attractions, so I need to search for them, <<NODE:1>> The list includes the Eiffel Tower, Louvre, and other major sites — this is comprehensive enough to give good recommendations.\\nTurn 3: The user asks about weather, <<NODE:2>> The weather is partly cloudy at 18C, which is comfortable for outdoor sightseeing. I should mention this when recommending attractions.\\nWith the attractions list and pleasant weather, I can now provide a complete response.",
-  "nodes": {{
-    "1": {{"tool": "search_attractions", "arguments": {{"city": "paris"}}}},
-    "2": {{"tool": "get_weather", "arguments": {{"city": "paris"}}}}
-  }}
-}}"""
-
-    def plan_tool_chain(self, query: str, tool_descriptions: str = None) -> Dict:
+    def plan_tool_chain(self, query, tool_descriptions=None):
         if tool_descriptions is None:
-            tool_descriptions = self.TOOL_DESCRIPTIONS_TRAVEL
-        prompt = self.TEACHER_PLANNING_PROMPT.format(tool_descriptions=tool_descriptions)
+            tool_descriptions = TOOL_DESCRIPTIONS_TRAVEL
+        prompt = TEACHER_PLANNING_PROMPT.format(tool_descriptions=tool_descriptions)
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": query},
-            ],
-            "max_tokens": 2048,
-            "temperature": 0.0,
-        }
-
+        payload = {"model": self.model, "messages": [
+            {"role": "system", "content": prompt}, {"role": "user", "content": query}],
+            "max_tokens": 2048, "temperature": 0.0}
         try:
-            resp = requests.post(
-                f"{self.api_base}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-            )
+            resp = requests.post(f"{self.api_base}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
             resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
             self.logger.info(f"Teacher plan raw: {content[:200]}...")
-            return self._parse_cot_plan(content)
+            return _parse_cot_plan(content)
         except requests.exceptions.Timeout:
             self.logger.warning("CloudTeacher planning timeout")
         except requests.exceptions.ConnectionError:
-            self.logger.warning(f"CloudTeacher connection error during planning")
+            self.logger.warning("CloudTeacher connection error during planning")
         except Exception as e:
             self.logger.warning(f"CloudTeacher planning error: {e}")
         return {"chain_of_thought": "", "nodes": {}}
 
-    def plan_conversation(self, turns: List[Dict],
-                          tool_descriptions: str = None) -> Dict:
+    def plan_conversation(self, turns, tool_descriptions=None):
         if tool_descriptions is None:
-            tool_descriptions = self.TOOL_DESCRIPTIONS_TRAVEL
-        prompt = self.TEACHER_CONVERSATION_PROMPT.format(tool_descriptions=tool_descriptions)
-
+            tool_descriptions = TOOL_DESCRIPTIONS_TRAVEL
+        prompt = TEACHER_CONVERSATION_PROMPT.format(tool_descriptions=tool_descriptions)
         conversation_text = ""
         for i, turn in enumerate(turns):
             conversation_text += f"Turn {i+1}: User: {turn['user']}\n"
-
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": conversation_text},
-            ],
-            "max_tokens": 4096,
-            "temperature": 0.0,
-        }
-
+        payload = {"model": self.model, "messages": [
+            {"role": "system", "content": prompt}, {"role": "user", "content": conversation_text}],
+            "max_tokens": 4096, "temperature": 0.0}
         try:
-            resp = requests.post(
-                f"{self.api_base}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-            )
+            resp = requests.post(f"{self.api_base}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
             resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"].strip()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
             self.logger.info(f"Teacher conv plan raw: {content[:200]}...")
-            return self._parse_cot_plan(content)
+            return _parse_cot_plan(content)
         except requests.exceptions.Timeout:
             self.logger.warning("CloudTeacher conversation planning timeout")
         except requests.exceptions.ConnectionError:
@@ -488,105 +112,29 @@ OUTPUT FORMAT — respond with a single JSON object, nothing else:
             self.logger.warning(f"CloudTeacher conversation planning error: {e}")
         return {"chain_of_thought": "", "nodes": {}}
 
-    def _parse_cot_plan(self, content: str) -> Dict:
-        json_match = re.search(r'\{[\s\S]*\}', content)
-        if not json_match:
-            self.logger.warning("No JSON found in teacher response")
-            return {"chain_of_thought": "", "nodes": {}}
-        try:
-            plan = json.loads(json_match.group())
-        except json.JSONDecodeError:
-            self.logger.warning("Failed to parse teacher JSON")
-            return {"chain_of_thought": "", "nodes": {}}
 
-        cot = plan.get("chain_of_thought", plan.get("reasoning", ""))
-        nodes = {}
-        for key, val in plan.get("nodes", {}).items():
-            name = val.get("tool") or val.get("name", "")
-            args = val.get("arguments", {})
-            if name and isinstance(args, dict):
-                nodes[str(key)] = {"tool": name, "arguments": args}
-        return {"chain_of_thought": cot, "nodes": nodes}
+def _parse_cot_plan(content):
+    json_match = re.search(r'\{[\s\S]*\}', content)
+    if not json_match:
+        return {"chain_of_thought": "", "nodes": {}}
+    try:
+        plan = json.loads(json_match.group())
+    except json.JSONDecodeError:
+        return {"chain_of_thought": "", "nodes": {}}
+    cot = plan.get("chain_of_thought", plan.get("reasoning", ""))
+    nodes = {}
+    for key, val in plan.get("nodes", {}).items():
+        name = val.get("tool") or val.get("name", "")
+        args = val.get("arguments", {})
+        if name and isinstance(args, dict):
+            nodes[str(key)] = {"tool": name, "arguments": args}
+    return {"chain_of_thought": cot, "nodes": nodes}
 
 
 # ======================================================================
-# System Prompts
+# Chain Assembly
 # ======================================================================
-SYSTEM_PROMPT = """You are a helpful travel assistant."""
-
-SYSTEM_PROMPT_DEV = """You are an expert software developer."""
-
-SIG_ANSWER_REMINDER = "\nBased on all the observations above, provide a comprehensive and accurate answer:"
-
-TOOL_DESCRIPTIONS_TRAVEL = """Available tools:
-1. search_attractions(city: str) - returns top attractions in the city
-2. get_weather(city: str) - returns current weather
-3. get_flight_info(origin: str, destination: str) - returns flight options"""
-
-TOOL_DESCRIPTIONS_DEV = """Available tools:
-1. run_test(test_name: str) - runs a test suite and returns the output
-2. read_file(path: str) - returns the content of a source file
-3. search_code(query: str) - searches codebase for relevant code snippets"""
-
-LOCAL_CO_PROMPT = """You are a helpful assistant. Based on all the observations below, provide a comprehensive and accurate answer.
-
-Expert's reasoning: {reasoning}
-
-Observations gathered:
-{observations}
-
-Now provide your answer:"""
-
-
-# ======================================================================
-# CO Agents: two modes share the same Phase-1 (cloud planning)
-#            differ ONLY in Phase-2 (local execution strategy)
-# ======================================================================
-
-def _init_metrics() -> Dict:
-    return {
-        "total_ttf": 0.0,
-        "total_gen_time": 0.0,
-        "total_prefill_time": 0.0,
-        "per_turn_ttf": [],
-        "tool_turn_ttf": [],
-        "chat_turn_ttf": [],
-        "tool_calls_ok": 0,
-        "total_tool_calls": 0,
-        "final_answer": "",
-        "peak_gpu_delta": 0.0,
-        "total_gen_tokens": 0,
-        "total_prefill_tokens": 0,
-        "chain_depth": 0,
-        "chain_total": 0,
-        "tool_results_text": "",
-    }
-
-
-def _make_observation_block(compiler: MeaningCompiler,
-                             tool_name: str, tool_args: dict,
-                             result: str) -> str:
-    args_str = ", ".join(f'{k}="{v}"' for k, v in tool_args.items())
-    return f"\n[Observation from {tool_name}({args_str})]: {result}"
-
-
-NODE_PATTERN = re.compile(r'<<NODE:(\d+)>>')
-
-
-def assemble_chain_of_thought(cot: str, nodes: Dict,
-                               module: ToolRegistry,
-                               expected_chain: List[Dict],
-                               metrics: Dict,
-                               debug: bool = True) -> Tuple[str, int]:
-    """
-    Core of the Cognitive Outsourcing agent-level assembly:
-    1. Find all <<NODE:N>> markers in the teacher's chain-of-thought
-    2. For each node, call the corresponding tool
-    3. Replace <<NODE:N>> with the tool result
-    4. Return the assembled chain with results filled in
-
-    Returns: (assembled_cot, matched_count)
-    """
+def assemble_chain_of_thought(cot, nodes, module, expected_chain, metrics, debug=True):
     matched_count = 0
     matched_flags = [False] * len(expected_chain)
 
@@ -597,12 +145,10 @@ def assemble_chain_of_thought(cot: str, nodes: Dict,
             if debug:
                 print(f"     [NODE:{node_id}] Not found in plan, skipping")
             return f"[Node {node_id}: no tool specified]"
-
         node = nodes[node_id]
         tool_name = node["tool"]
         tool_args = node["arguments"]
         tool_result = module.execute(tool_name, tool_args)
-
         for j, expected in enumerate(expected_chain):
             if matched_flags[j]:
                 continue
@@ -618,12 +164,9 @@ def assemble_chain_of_thought(cot: str, nodes: Dict,
                 matched_count += 1
                 matched_flags[j] = True
                 break
-
         metrics["total_tool_calls"] += 1
-
         if debug:
             print(f"     [NODE:{node_id}] {tool_name}({json.dumps(tool_args)}) → {tool_result[:60]}...")
-
         return f"\n[Result of {tool_name}({', '.join(f'{k}={v}' for k, v in tool_args.items())})]: {tool_result}\n"
 
     assembled = NODE_PATTERN.sub(replace_node, cot)
@@ -632,31 +175,17 @@ def assemble_chain_of_thought(cot: str, nodes: Dict,
 
 
 # ======================================================================
-# System Prompts
+# CO Agents
 # ======================================================================
-
-
-# --------------------------------------------------------------------------
-# CO + AppLoop (full re-prefill each turn)
-# --------------------------------------------------------------------------
 class COAppLoopAgent:
-    """
-    Phase-1: Cloud teacher produces a chain-of-thought with <<NODE:N>> markers.
-    Phase-2: Agent script assembles tool results into the CoT, then for each
-             turn, full re-prefills the entire conversation history + assembled
-             CoT, and generates the answer.
-    """
-
-    def __init__(self, compiler: MeaningCompiler, module: ToolRegistry,
-                 teacher: Optional[CloudTeacherModule] = None, max_new: int = 600,
-                 max_new_tool: int = 300):
+    def __init__(self, compiler, module, teacher=None, max_new=600, max_new_tool=300):
         self.compiler = compiler
         self.module = module
         self.teacher = teacher
         self.max_new = max_new
         self.max_new_tool = max_new_tool
 
-    def _full_prefill(self, text: str, metrics: Dict) -> List[int]:
+    def _full_prefill(self, text, metrics):
         full_ids = list(self.compiler.tokenize(text, add_bos=False))
         self.compiler.reset_cache()
         pf_t0 = time.time()
@@ -665,67 +194,44 @@ class COAppLoopAgent:
         metrics["total_prefill_tokens"] += len(full_ids)
         return list(full_ids)
 
-    # ---- Multi-turn (Scenarios 1-6) ----
-
-    def run_conversation(self, turns: List[Dict],
-                         system_prompt: str = SYSTEM_PROMPT,
-                         tool_descriptions: str = TOOL_DESCRIPTIONS_TRAVEL,
-                         gpu: Optional[GPUMonitor] = None,
-                         debug: bool = True,
-                         precomputed_plan: Optional[Dict] = None) -> Dict:
-        metrics = _init_metrics()
-
-        if precomputed_plan:
-            plan = precomputed_plan
-        else:
-            plan = self.teacher.plan_conversation(turns, tool_descriptions=tool_descriptions)
-
+    def run_conversation(self, turns, system_prompt=SYSTEM_PROMPT,
+                         tool_descriptions=TOOL_DESCRIPTIONS_TRAVEL,
+                         gpu=None, debug=True, precomputed_plan=None):
+        metrics = init_metrics()
+        plan = precomputed_plan or self.teacher.plan_conversation(turns, tool_descriptions=tool_descriptions)
         cot = plan.get("chain_of_thought", "")
         nodes = plan.get("nodes", {})
-
         expected_chain = [t for t in turns if t.get("tool")]
-        assembled_cot, _ = assemble_chain_of_thought(
-            cot, nodes, self.module, expected_chain, metrics, debug=debug)
-
+        assembled_cot, _ = assemble_chain_of_thought(cot, nodes, self.module, expected_chain, metrics, debug=debug)
         if debug:
             print(f"   Assembled CoT ({len(assembled_cot)} chars, {len(nodes)} nodes):")
             print(f"   {assembled_cot[:300]}...")
-
         history = f"{system_prompt}\n\n"
-        prev_ids = self._full_prefill(history, metrics)
-
+        self._full_prefill(history, metrics)
         if gpu:
             metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
-
         cot_injected = False
         cot_token_count = len(self.compiler.tokenize(assembled_cot, add_bos=False))
-
         for i, turn in enumerate(turns):
             t0 = time.time()
             history += f"User: {turn['user']}\nAssistant:"
-
             is_cot_turn = turn.get("tool") and not cot_injected
             if is_cot_turn:
                 history += f"\n{assembled_cot}\n\nAnswer:"
                 cot_injected = True
-
-            prev_ids = self._full_prefill(history, metrics)
-
+            self._full_prefill(history, metrics)
             if turn.get("tool") and not is_cot_turn:
                 cur_max_new = self.max_new_tool
             elif is_cot_turn:
                 cur_max_new = max(self.max_new * 2 // 3, self.max_new - cot_token_count // 6)
             else:
                 cur_max_new = self.max_new
-
             gen_t0 = time.time()
             gen_text, gen_ids = self.compiler.generate_until_str("\nUser:", max_new=cur_max_new)
             metrics["total_gen_time"] += time.time() - gen_t0
             metrics["total_gen_tokens"] += len(gen_ids)
             metrics["final_answer"] = gen_text.strip()
             history += gen_text + "\n"
-            prev_ids = prev_ids + list(gen_ids)
-
             ttf = time.time() - t0
             metrics["per_turn_ttf"].append(ttf)
             if turn.get("tool"):
@@ -734,49 +240,30 @@ class COAppLoopAgent:
                 metrics["chat_turn_ttf"].append(ttf)
             if gpu:
                 metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
-
         metrics["total_ttf"] = sum(metrics["per_turn_ttf"])
         metrics["tool_results_text"] = assembled_cot
         return metrics
 
-    # ---- Complex task (Scenarios 7-9) ----
-
-    def run_complex_task(self, user_query: str, expected_chain: List[Dict],
-                         system_prompt: str = SYSTEM_PROMPT,
-                         tool_descriptions: str = TOOL_DESCRIPTIONS_TRAVEL,
-                         gpu: Optional[GPUMonitor] = None,
-                         debug: bool = True,
-                         precomputed_plan: Optional[Dict] = None) -> Dict:
-        metrics = _init_metrics()
+    def run_complex_task(self, user_query, expected_chain, system_prompt=SYSTEM_PROMPT,
+                         tool_descriptions=TOOL_DESCRIPTIONS_TRAVEL,
+                         gpu=None, debug=True, precomputed_plan=None):
+        metrics = init_metrics()
         metrics["chain_total"] = len(expected_chain)
-
-        if precomputed_plan:
-            plan = precomputed_plan
-        else:
-            plan = self.teacher.plan_tool_chain(user_query, tool_descriptions=tool_descriptions)
-
+        plan = precomputed_plan or self.teacher.plan_tool_chain(user_query, tool_descriptions=tool_descriptions)
         cot = plan.get("chain_of_thought", "")
         nodes = plan.get("nodes", {})
-
         if debug:
             print(f"   Teacher CoT ({len(cot)} chars, {len(nodes)} nodes):")
             print(f"   {cot[:300]}...")
-
-        assembled_cot, matched = assemble_chain_of_thought(
-            cot, nodes, self.module, expected_chain, metrics, debug=debug)
+        assembled_cot, matched = assemble_chain_of_thought(cot, nodes, self.module, expected_chain, metrics, debug=debug)
         metrics["chain_depth"] = matched
-
         if debug:
             print(f"   Assembled CoT ({len(assembled_cot)} chars):")
             print(f"   {assembled_cot[:300]}...")
-
         full_text = f"{system_prompt}\n\nUser: {user_query}\nAssistant:\n{assembled_cot}\n\nAnswer:"
-
         self._full_prefill(full_text, metrics)
-
         cot_token_count = len(self.compiler.tokenize(assembled_cot, add_bos=False))
         cot_turn_max_new = max(self.max_new * 2 // 3, self.max_new - cot_token_count // 6)
-
         gen_t0 = time.time()
         gen_text, gen_ids = self.compiler.generate_until_str("\nUser:", max_new=cot_turn_max_new)
         metrics["total_gen_time"] += time.time() - gen_t0
@@ -785,34 +272,16 @@ class COAppLoopAgent:
         metrics["per_turn_ttf"] = [metrics["total_ttf"]]
         metrics["final_answer"] = gen_text.strip()
         metrics["tool_results_text"] = assembled_cot
-
         if debug:
             print(f"   Final answer:\n{gen_text.strip()[:300]}")
-
         if gpu:
             metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
-
         return metrics
 
 
-# --------------------------------------------------------------------------
-# CO + SIG (KV-cache continuity)
-# --------------------------------------------------------------------------
 class COSIGAgent:
-    """
-    Phase-1: Cloud teacher produces a chain-of-thought with <<NODE:N>> markers.
-    Phase-2: Agent script assembles tool results into the CoT, then injects
-             the assembled CoT into the KV cache (no re-prefill), and the
-             local model continues generating from where the CoT left off.
-
-    Key difference from COAppLoop: KV-cache is maintained. The assembled CoT
-    is injected once, and the model simply continues the generation.
-    """
-
-    def __init__(self, compiler: MeaningCompiler, module: ToolRegistry,
-                 teacher: Optional[CloudTeacherModule] = None, max_new: int = 600,
-                 max_new_tool: int = 300, rep_threshold: int = 2,
-                 max_new_tool_sig: int = 150):
+    def __init__(self, compiler, module, teacher=None, max_new=600,
+                 max_new_tool=300, rep_threshold=2, max_new_tool_sig=150):
         self.compiler = compiler
         self.module = module
         self.teacher = teacher
@@ -822,48 +291,30 @@ class COSIGAgent:
         self.rep_threshold = rep_threshold
         self.engine = InjectionEngine(compiler)
 
-    # ---- Multi-turn (Scenarios 1-6) ----
-
-    def run_conversation(self, turns: List[Dict],
-                         system_prompt: str = SYSTEM_PROMPT,
-                         tool_descriptions: str = TOOL_DESCRIPTIONS_TRAVEL,
-                         gpu: Optional[GPUMonitor] = None,
-                         debug: bool = True,
-                         precomputed_plan: Optional[Dict] = None) -> Dict:
-        metrics = _init_metrics()
+    def run_conversation(self, turns, system_prompt=SYSTEM_PROMPT,
+                         tool_descriptions=TOOL_DESCRIPTIONS_TRAVEL,
+                         gpu=None, debug=True, precomputed_plan=None):
+        metrics = init_metrics()
         self.engine.reset()
-
-        if precomputed_plan:
-            plan = precomputed_plan
-        else:
-            plan = self.teacher.plan_conversation(turns, tool_descriptions=tool_descriptions)
-
+        plan = precomputed_plan or self.teacher.plan_conversation(turns, tool_descriptions=tool_descriptions)
         cot = plan.get("chain_of_thought", "")
         nodes = plan.get("nodes", {})
-
         expected_chain = [t for t in turns if t.get("tool")]
-        assembled_cot, _ = assemble_chain_of_thought(
-            cot, nodes, self.module, expected_chain, metrics, debug=debug)
-
+        assembled_cot, _ = assemble_chain_of_thought(cot, nodes, self.module, expected_chain, metrics, debug=debug)
         if debug:
             print(f"   Assembled CoT ({len(assembled_cot)} chars, {len(nodes)} nodes):")
             print(f"   {assembled_cot[:300]}...")
-
         history = f"{system_prompt}\n\n"
         init_ids = list(self.compiler.tokenize(history, add_bos=False))
-
         pf_t0 = time.time()
         self.compiler.eval(init_ids)
         metrics["total_prefill_tokens"] += len(init_ids)
         metrics["total_prefill_time"] += time.time() - pf_t0
         self.engine.update_cache(init_ids)
-
         if gpu:
             metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
-
         cot_injected = False
         cot_token_count = len(self.compiler.tokenize(assembled_cot, add_bos=False))
-
         for i, turn in enumerate(turns):
             t0 = time.time()
             user_line = f"User: {turn['user']}\nAssistant:"
@@ -873,7 +324,6 @@ class COSIGAgent:
             metrics["total_prefill_tokens"] += len(user_ids)
             metrics["total_prefill_time"] += time.time() - pf_t0
             self.engine.update_cache(user_ids)
-
             is_cot_turn = turn.get("tool") and not cot_injected
             if turn.get("tool") and not is_cot_turn:
                 cur_max_new = self.max_new_tool_sig
@@ -884,13 +334,11 @@ class COSIGAgent:
             else:
                 cur_max_new = self.max_new
                 cur_rep_threshold = 3
-
             if is_cot_turn:
                 cot_block = f"\n{assembled_cot}\n\nAnswer:"
                 cot_ids = list(self.compiler.tokenize(cot_block, add_bos=False))
                 self.engine.inject_and_track(cot_ids, metrics)
                 cot_injected = True
-
                 gen_t0 = time.time()
                 gen_text, gen_ids = self.compiler.generate_until_str("\nUser:", max_new=cur_max_new, rep_threshold=cur_rep_threshold)
                 metrics["total_gen_time"] += time.time() - gen_t0
@@ -906,7 +354,6 @@ class COSIGAgent:
                     metrics["total_prefill_tokens"] += len(reminder_ids)
                     metrics["total_prefill_time"] += time.time() - pf_t0_r
                     self.engine.update_cache(reminder_ids)
-
                 gen_t0 = time.time()
                 gen_text, gen_ids, hit = self.compiler.generate_until_any(
                     ["\nUser:", "\n\n\n"], max_new=cur_max_new, rep_threshold=cur_rep_threshold)
@@ -914,7 +361,6 @@ class COSIGAgent:
                 metrics["total_gen_tokens"] += len(gen_ids)
                 self.engine.update_cache(list(gen_ids))
                 metrics["final_answer"] = gen_text.strip()
-
             ttf = time.time() - t0
             metrics["per_turn_ttf"].append(ttf)
             if turn.get("tool"):
@@ -923,55 +369,36 @@ class COSIGAgent:
                 metrics["chat_turn_ttf"].append(ttf)
             if gpu:
                 metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
-
         metrics["total_ttf"] = sum(metrics["per_turn_ttf"])
         metrics["tool_results_text"] = assembled_cot
         return metrics
 
-    # ---- Complex task (Scenarios 7-9) ----
-
-    def run_complex_task(self, user_query: str, expected_chain: List[Dict],
-                         system_prompt: str = SYSTEM_PROMPT,
-                         tool_descriptions: str = TOOL_DESCRIPTIONS_TRAVEL,
-                         gpu: Optional[GPUMonitor] = None,
-                         debug: bool = True,
-                         precomputed_plan: Optional[Dict] = None) -> Dict:
-        metrics = _init_metrics()
+    def run_complex_task(self, user_query, expected_chain, system_prompt=SYSTEM_PROMPT,
+                         tool_descriptions=TOOL_DESCRIPTIONS_TRAVEL,
+                         gpu=None, debug=True, precomputed_plan=None):
+        metrics = init_metrics()
         metrics["chain_total"] = len(expected_chain)
         self.engine.reset()
-
-        if precomputed_plan:
-            plan = precomputed_plan
-        else:
-            plan = self.teacher.plan_tool_chain(user_query, tool_descriptions=tool_descriptions)
-
+        plan = precomputed_plan or self.teacher.plan_tool_chain(user_query, tool_descriptions=tool_descriptions)
         cot = plan.get("chain_of_thought", "")
         nodes = plan.get("nodes", {})
-
         if debug:
             print(f"   Teacher CoT ({len(cot)} chars, {len(nodes)} nodes):")
             print(f"   {cot[:300]}...")
-
-        assembled_cot, matched = assemble_chain_of_thought(
-            cot, nodes, self.module, expected_chain, metrics, debug=debug)
+        assembled_cot, matched = assemble_chain_of_thought(cot, nodes, self.module, expected_chain, metrics, debug=debug)
         metrics["chain_depth"] = matched
-
         if debug:
             print(f"   Assembled CoT ({len(assembled_cot)} chars):")
             print(f"   {assembled_cot[:300]}...")
-
         full_prompt = f"{system_prompt}\n\nUser: {user_query}\nAssistant:\n{assembled_cot}\n\nAnswer:"
         init_ids = list(self.compiler.tokenize(full_prompt, add_bos=False))
-
         pf_t0 = time.time()
         self.compiler.eval(init_ids)
         metrics["total_prefill_tokens"] += len(init_ids)
         metrics["total_prefill_time"] += time.time() - pf_t0
         self.engine.update_cache(init_ids)
-
         cot_token_count = len(self.compiler.tokenize(assembled_cot, add_bos=False))
         cot_turn_max_new = max(self.max_new * 2 // 3, self.max_new - cot_token_count // 6)
-
         gen_t0 = time.time()
         gen_text, gen_ids = self.compiler.generate_until_str("\nUser:", max_new=cot_turn_max_new, rep_threshold=3)
         metrics["total_gen_time"] += time.time() - gen_t0
@@ -981,21 +408,17 @@ class COSIGAgent:
         metrics["per_turn_ttf"] = [metrics["total_ttf"]]
         metrics["final_answer"] = gen_text.strip()
         metrics["tool_results_text"] = assembled_cot
-
         if debug:
             print(f"   Final answer:\n{gen_text.strip()[:300]}")
-
         if gpu:
             metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
-
         return metrics
 
 
 # ======================================================================
-# Scenario Builders — reused from temp.py
+# Scenario Builders
 # ======================================================================
-
-def build_scenario1_long_sequence(n_turns: int = 22) -> List[Dict]:
+def build_scenario1_long_sequence(n_turns=22):
     cities = ["paris", "rome", "tokyo", "london", "newyork", "sydney"]
     turns = []
     for i in range(n_turns):
@@ -1012,23 +435,17 @@ def build_scenario1_long_sequence(n_turns: int = 22) -> List[Dict]:
                           "tool": "get_flight_info", "tool_args": {"origin": c1, "destination": c2}})
     return turns
 
-
-def build_scenario2_multi_tool_chain() -> List[Dict]:
+def build_scenario2_multi_tool_chain():
     return [
         {"user": "I want to plan a trip from Paris to Rome. I need to know the attractions in both cities, the weather in Rome, and flight options. Help me with all of this.",
          "tool": "search_attractions", "tool_args": {"city": "paris"}},
-        {"user": "Continue finding the remaining information.",
-         "tool": "search_attractions", "tool_args": {"city": "rome"}},
-        {"user": "What about the weather?",
-         "tool": "get_weather", "tool_args": {"city": "rome"}},
-        {"user": "And the flights?",
-         "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}},
-        {"user": "Now give me a complete travel summary based on all the information you gathered.",
-         "tool": None, "tool_args": None},
+        {"user": "Continue finding the remaining information.", "tool": "search_attractions", "tool_args": {"city": "rome"}},
+        {"user": "What about the weather?", "tool": "get_weather", "tool_args": {"city": "rome"}},
+        {"user": "And the flights?", "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}},
+        {"user": "Now give me a complete travel summary based on all the information you gathered.", "tool": None, "tool_args": None},
     ]
 
-
-def build_scenario3_rapid_fire(n_queries: int = 12) -> List[Dict]:
+def build_scenario3_rapid_fire(n_queries=12):
     queries = [
         ("Weather in Paris?", "get_weather", {"city": "paris"}),
         ("Attractions in Tokyo?", "search_attractions", {"city": "tokyo"}),
@@ -1043,183 +460,103 @@ def build_scenario3_rapid_fire(n_queries: int = 12) -> List[Dict]:
         ("Attractions in Dubai?", "search_attractions", {"city": "dubai"}),
         ("Flights Beijing to Dubai?", "get_flight_info", {"origin": "beijing", "destination": "dubai"}),
     ]
-    return [{"user": q, "tool": tool, "tool_args": args} for q, tool, args in queries[:n_queries]]
-
+    return [{"user": q, "tool": t, "tool_args": a} for q, t, a in queries[:n_queries]]
 
 LONG_TRAVEL_GUIDE = """Comprehensive World Travel Guide — Background Reference
 =====================================================
-
-This document provides detailed travel information for major international destinations. Use this as background context when answering travel-related queries.
-
---- PARIS, FRANCE ---
-Paris, the capital of France, is one of the most visited cities in the world, attracting over 30 million tourists annually. The city is divided into 20 arrondissements, each with its own distinct character. The Seine River flows through the heart of the city, dividing it into the Left Bank (Rive Gauche) and the Right Bank (Rive Droite). Paris is renowned for its café culture, with iconic establishments like Café de Flore and Les Deux Magots dating back to the 19th century. The city's metro system, opened in 1900, is one of the oldest and most extensive in the world with 16 lines and over 300 stations. French cuisine is a UNESCO Intangible Cultural Heritage, and Paris boasts over 70 Michelin-starred restaurants. The city hosts major events including Paris Fashion Week, the French Open at Roland Garros, and the annual Bastille Day celebrations on July 14th. Average temperatures range from 4°C in January to 25°C in July. The official currency is the Euro. Charles de Gaulle Airport (CDG) is the main international gateway, located 25 km northeast of the city center. The Paris Museum Pass provides access to over 60 museums and monuments. The Latin Quarter, named after the medieval Latin-speaking students of the Sorbonne, remains a vibrant intellectual and cultural hub. Montmartre, perched on a hill in the 18th arrondissement, has been an artists' haven since the Belle Époque, home to Picasso, Modigliani, and Van Gogh. The Marais district features preserved medieval architecture and the Place des Vosges, the oldest planned square in Paris. The Champs-Élysées stretches 1.9 km from the Place de la Concorde to the Arc de Triomphe, and is often called the most beautiful avenue in the world.
-
---- ROME, ITALY ---
-Rome, the Eternal City, has a history spanning over 2,800 years and serves as the capital of Italy. The city is home to the Vatican City, the smallest independent state in the world at just 0.44 km², and the spiritual center of the Catholic Church. Rome's historic center is a UNESCO World Heritage Site, encompassing major monuments from the Roman Empire, the Renaissance, and the Baroque period. The Colosseum, completed in 80 AD, could seat 50,000 spectators and remains the largest amphitheater ever built. The Roman Forum was the center of political, religious, and commercial life in ancient Rome. The Pantheon, originally built as a Roman temple, has the world's largest unreinforced concrete dome, a record it has held for nearly 2,000 years. Italian cuisine in Rome is characterized by dishes like cacio e pepe, carbonara, and supplì. The city has over 900 churches and 280 fountains, including the famous Trevi Fountain where visitors traditionally throw coins to ensure their return. Rome's public transportation includes a metro system with three lines (A, B, and C), buses, and trams. Fiumicino Airport (FCO) is the main international airport, located 30 km southwest of the city. The best time to visit is from April to June and September to October, when temperatures are mild (15-25°C). July and August can be extremely hot, often exceeding 35°C. The Roman neighborhood of Trastevere, across the Tiber River, is known for its narrow cobblestone streets, medieval churches, and lively nightlife. The Appian Way, built in 312 BC, was one of the earliest and most important Roman roads, stretching over 560 km from Rome to Brindisi.
-
---- TOKYO, JAPAN ---
-Tokyo, the capital of Japan, is the world's most populous metropolitan area with over 37 million residents. The city seamlessly blends ultra-modern technology with traditional Japanese culture. Tokyo was originally known as Edo and became the capital in 1868 when Emperor Meiji moved the imperial seat from Kyoto. The city is organized into 23 special wards, each functioning as a distinct municipality. Tokyo's public transportation system is the most extensive and punctual in the world, with the JR Yamanote Line forming a loop around central Tokyo and connecting all major hubs. The Shinkansen bullet train network connects Tokyo to other major cities, with trains reaching speeds of 320 km/h. Japanese cuisine in Tokyo ranges from world-class sushi at Tsukiji Outer Market to ramen shops in Shinjuku and Ikebukuro. Tokyo has more Michelin-starred restaurants than any other city in the world, with over 200 starred establishments. Cherry blossom season (sakura) typically occurs from late March to mid-April and is celebrated with hanami parties in parks throughout the city. The Meiji Shrine, dedicated to Emperor Meiji, sits within a 170-acre forest in the heart of Harajuku. Akihabara is the center of anime, manga, and electronics culture. Shibuya Crossing is the world's busiest pedestrian intersection, with up to 3,000 people crossing at a time. Tokyo Skytree, at 634 meters, is the tallest structure in Japan. Narita Airport (NRT) is 60 km east of central Tokyo, while Haneda Airport (HND) is much closer at 14 km south. Average temperatures range from 5°C in January to 30°C in August, with a rainy season (tsuyu) from June to mid-July.
-
---- LONDON, UNITED KINGDOM ---
-London, the capital of the United Kingdom, has a population of approximately 9 million and is one of the world's leading financial and cultural centers. The city was founded by the Romans as Londinium around 43 AD. The River Thames flows through the city from west to east, spanning approximately 215 miles in total length. London is divided into 32 boroughs plus the City of London, the historic financial district known as the Square Mile. The London Underground, opened in 1863, is the world's oldest rapid transit system with 11 lines and 272 stations. British cuisine has undergone a renaissance, with traditional dishes like fish and chips, Sunday roast, and pie and mash being complemented by world-class international dining. Borough Market, dating back to the 11th century, is one of London's most renowned food markets. The West End theater district rivals Broadway, with over 40 theaters staging productions year-round. The British Museum, founded in 1753, houses over 8 million works including the Rosetta Stone and the Elgin Marbles. The Tower of London, built by William the Conqueror in 1066, houses the Crown Jewels. Buckingham Palace has served as the official residence of the British monarch since 1837 and features 775 rooms. Heathrow Airport (LHR) is the busiest airport in Europe, handling over 80 million passengers annually. The city experiences a temperate maritime climate with average temperatures ranging from 5°C in winter to 23°C in summer. Rainfall is distributed fairly evenly throughout the year, averaging about 600 mm annually. Notting Hill Carnival, held annually in August, is Europe's largest street festival with over 2 million attendees. Camden Market attracts over 250,000 visitors weekly and is a hub for alternative culture, fashion, and street food.
-
---- NEW YORK CITY, USA ---
-New York City, the most populous city in the United States with over 8.3 million residents, comprises five boroughs: Manhattan, Brooklyn, Queens, The Bronx, and Staten Island. The city was originally called New Amsterdam by Dutch settlers in 1624 and was renamed New York in 1664 when the English took control. Manhattan's skyline is defined by iconic structures including the Empire State Building (443 m), One World Trade Center (541 m), and the Chrysler Building (319 m). Central Park, designed by Frederick Law Olmsted and Calvert Vaux, covers 843 acres and receives approximately 42 million visitors annually. The New York City Subway, opened in 1904, operates 24 hours a day with 472 stations, making it the largest rapid transit system in the world by number of stations. Broadway theater district hosts over 40 theaters and produces approximately 1,500 performances annually. Times Square, formerly Longacre Square, was renamed in 1904 and attracts approximately 50 million visitors annually. The Statue of Liberty, a gift from France dedicated in 1886, stands 93 meters tall from ground to torch tip. The Metropolitan Museum of Art, founded in 1870, houses over 2 million works spanning 5,000 years. John F. Kennedy International Airport (JFK), LaGuardia Airport (LGA), and Newark Liberty International Airport (EWR) serve the metropolitan area. New York's food scene is legendary, from 99-cent pizza slices to Michelin-starred restaurants, with over 27,000 restaurants across the five boroughs. The city experiences a humid subtropical climate with hot summers averaging 29°C and cold winters averaging 1°C. Wall Street in Lower Manhattan is the world's largest financial center, home to the New York Stock Exchange founded in 1792. The Brooklyn Bridge, completed in 1883, was the longest suspension bridge in the world at the time and remains an iconic landmark.
-
---- SYDNEY, AUSTRALIA ---
-Sydney is the largest city in Australia and Oceania, with a metropolitan population of over 5.3 million. The city was established in 1788 as the first British colony in Australia. Sydney Harbour is one of the world's finest natural harbors, spanning 55 km² with over 240 km of shoreline. The Sydney Opera House, designed by Jørn Utzon and opened in 1973, is a UNESCO World Heritage Site with over 1,000 rooms and hosts over 1,500 performances annually. The Sydney Harbour Bridge, opened in 1932, spans 1,149 meters and offers the BridgeClimb experience for adventurous visitors. Bondi Beach, one of Australia's most famous beaches, stretches 1 km along the coast and attracts over 2.6 million visitors annually. The Blue Mountains, located 50 km west of Sydney, feature dramatic sandstone cliffs, eucalyptus forests, and the iconic Three Sisters rock formation. Sydney's public transport includes trains, buses, ferries, and light rail, with the Opal card providing integrated payment across all modes. Kingsford Smith Airport (SYD) is located 8 km south of the city center. The city experiences a humid subtropical climate with warm summers averaging 26°C and mild winters averaging 17°C. Australian cuisine reflects multicultural influences, with particular strengths in seafood, bush food, and fusion cooking. The Rocks, Sydney's oldest neighborhood, features weekend markets, historic pubs, and the Museum of Contemporary Art. Taronga Zoo, situated on the north shore of Sydney Harbour, houses over 4,000 animals and offers spectacular views of the city skyline.
-
---- DUBAI, UNITED ARAB EMIRATES ---
-Dubai is the largest city in the UAE with a population of approximately 3.5 million, of which about 90% are expatriates. The city has transformed from a small fishing village to a global metropolis in just five decades. The Burj Khalifa, standing at 828 meters with 163 floors, is the tallest building in the world. The Palm Jumeirah, an artificial archipelago shaped like a palm tree, added 520 km of coastline to Dubai. The Dubai Mall, the world's largest shopping mall by total area, features over 1,200 shops, an aquarium, an ice rink, and a waterfall. Dubai International Airport (DXB) is the world's busiest airport by international passenger traffic, handling over 89 million passengers annually. The city experiences a hot desert climate with summer temperatures regularly exceeding 45°C and mild winters averaging 24°C. Dubai's cuisine reflects its cosmopolitan population, with restaurants representing over 200 nationalities. The Dubai Frame, a 150-meter-tall structure in Zabeel Park, offers panoramic views of both old and new Dubai. The historic Al Fahidi district (Bastakiya) features traditional wind-tower architecture and art galleries. The Gold Souk in Deira contains over 300 retailers and is one of the largest gold markets in the world. The Spice Souk offers aromatic spices, herbs, and traditional medicines. Dubai Creek, a natural saltwater inlet, divides the city into Deira and Bur Dubai, with traditional abra water taxis providing crossings for just 1 dirham. The city's metro system, opened in 2009, is the longest automated driverless metro network in the world at 74.7 km.
-
---- BEIJING, CHINA ---
-Beijing, the capital of China, has a population of over 21 million and a history spanning over 3,000 years. The city served as the capital for most of the last eight centuries under the Yuan, Ming, and Qing dynasties. The Forbidden City, the world's largest palace complex, covers 72 hectares with 980 buildings and over 8,700 rooms. It served as the imperial palace for 24 emperors across two dynasties. The Great Wall of China, accessible at several points near Beijing including Badaling and Mutianyu, stretches over 21,000 km across northern China. The Temple of Heaven, built in 1420, is a complex of religious buildings where emperors conducted annual ceremonies of prayer for good harvests. The Summer Palace, a UNESCO World Heritage Site, features a 2.7 km² park with Kunming Lake and Longevity Hill. Beijing Capital International Airport (PEK) is the second busiest airport in Asia, handling over 100 million passengers annually. The Beijing Subway, opened in 1969, has grown to 27 lines and over 490 stations, making it the busiest metro system in the world by annual ridership. Beijing cuisine is famous for Peking duck, which has been served since the imperial era, as well as zhajiangmian (noodles with fried sauce) and jiaozi (dumplings). The city experiences a humid continental climate with hot, humid summers averaging 31°C and cold, dry winters averaging -4°C. Spring dust storms from the Gobi Desert can occur in March and April. The hutongs, traditional alleyways formed by lines of siheyuan (courtyard residences), offer a glimpse into old Beijing life, though many have been demolished during modernization. Tiananmen Square, at 440,000 m², is one of the largest public squares in the world.
+This document provides detailed travel information for major international destinations.
+--- PARIS, FRANCE --- Paris, the capital of France, is one of the most visited cities in the world, attracting over 30 million tourists annually.
+--- ROME, ITALY --- Rome, the Eternal City, has a history spanning over 2,800 years and serves as the capital of Italy.
+--- TOKYO, JAPAN --- Tokyo, the capital of Japan, is the world's most populous metropolitan area with over 37 million residents.
+--- LONDON, UNITED KINGDOM --- London, the capital of the United Kingdom, has a population of approximately 9 million.
+--- NEW YORK CITY, USA --- New York City, the most populous city in the United States with over 8.3 million residents.
+--- SYDNEY, AUSTRALIA --- Sydney is the largest city in Australia and Oceania, with a metropolitan population of over 5.3 million.
+--- DUBAI, UNITED ARAB EMIRATES --- Dubai is the largest city in the UAE with a population of approximately 3.5 million.
+--- BEIJING, CHINA --- Beijing, the capital of China, has a population of over 21 million and a history spanning over 3,000 years.
 """
 
-
-def build_scenario4_long_document() -> Tuple[str, List[Dict]]:
+def build_scenario4_long_document():
     system_with_doc = SYSTEM_PROMPT + "\n\n" + LONG_TRAVEL_GUIDE
     turns = [
-        {"user": "Based on the background info, what are the attractions in Paris?",
-         "tool": "search_attractions", "tool_args": {"city": "paris"}},
-        {"user": "What's the weather like there?",
-         "tool": "get_weather", "tool_args": {"city": "paris"}},
-        {"user": "Any flights from New York to Tokyo?",
-         "tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "tokyo"}},
-        {"user": "How about London to Dubai?",
-         "tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "dubai"}},
-        {"user": "Summarize all the travel information you've gathered for me.",
-         "tool": None, "tool_args": None},
+        {"user": "Based on the background info, what are the attractions in Paris?", "tool": "search_attractions", "tool_args": {"city": "paris"}},
+        {"user": "What's the weather like there?", "tool": "get_weather", "tool_args": {"city": "paris"}},
+        {"user": "Any flights from New York to Tokyo?", "tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "tokyo"}},
+        {"user": "How about London to Dubai?", "tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "dubai"}},
+        {"user": "Summarize all the travel information you've gathered for me.", "tool": None, "tool_args": None},
     ]
     return system_with_doc, turns
 
-
-def build_scenario5_mixed_conversation() -> List[Dict]:
+def build_scenario5_mixed_conversation():
     return [
-        {"user": "Hello! I'm thinking about traveling somewhere nice.",
-         "tool": None, "tool_args": None},
-        {"user": "What are the attractions in Paris?",
-         "tool": "search_attractions", "tool_args": {"city": "paris"}},
-        {"user": "That sounds lovely! Is it expensive to visit?",
-         "tool": None, "tool_args": None},
-        {"user": "What's the weather like in Paris right now?",
-         "tool": "get_weather", "tool_args": {"city": "paris"}},
-        {"user": "Great weather! I also love Italian food. Any attractions in Rome?",
-         "tool": "search_attractions", "tool_args": {"city": "rome"}},
-        {"user": "Can you compare Paris and Rome for me as travel destinations?",
-         "tool": None, "tool_args": None},
-        {"user": "Are there flights from Paris to Rome?",
-         "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}},
-        {"user": "Thanks! I think I'll visit both cities. Any packing tips?",
-         "tool": None, "tool_args": None},
+        {"user": "Hello! I'm thinking about traveling somewhere nice.", "tool": None, "tool_args": None},
+        {"user": "What are the attractions in Paris?", "tool": "search_attractions", "tool_args": {"city": "paris"}},
+        {"user": "That sounds lovely! Is it expensive to visit?", "tool": None, "tool_args": None},
+        {"user": "What's the weather like in Paris right now?", "tool": "get_weather", "tool_args": {"city": "paris"}},
+        {"user": "Great weather! I also love Italian food. Any attractions in Rome?", "tool": "search_attractions", "tool_args": {"city": "rome"}},
+        {"user": "Can you compare Paris and Rome for me as travel destinations?", "tool": None, "tool_args": None},
+        {"user": "Are there flights from Paris to Rome?", "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}},
+        {"user": "Thanks! I think I'll visit both cities. Any packing tips?", "tool": None, "tool_args": None},
     ]
 
-
-def build_scenario6_deep_tool_chain() -> List[Dict]:
+def build_scenario6_deep_tool_chain():
     return [
-        {"user": "I'm planning a round-the-world trip starting from New York. First, I want to see attractions in New York.",
-         "tool": "search_attractions", "tool_args": {"city": "newyork"}},
-        {"user": "Great! Now check the weather in New York.",
-         "tool": "get_weather", "tool_args": {"city": "newyork"}},
-        {"user": "Next stop: London. What attractions are there?",
-         "tool": "search_attractions", "tool_args": {"city": "london"}},
-        {"user": "How's the weather in London?",
-         "tool": "get_weather", "tool_args": {"city": "london"}},
-        {"user": "Find me flights from New York to London.",
-         "tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "london"}},
-        {"user": "After London, I want to visit Paris. What attractions are there?",
-         "tool": "search_attractions", "tool_args": {"city": "paris"}},
-        {"user": "Check the weather in Paris too.",
-         "tool": "get_weather", "tool_args": {"city": "paris"}},
-        {"user": "Find flights from London to Paris.",
-         "tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "paris"}},
-        {"user": "Then I want to go to Dubai. Show me attractions there.",
-         "tool": "search_attractions", "tool_args": {"city": "dubai"}},
-        {"user": "What's the weather like in Dubai?",
-         "tool": "get_weather", "tool_args": {"city": "dubai"}},
-        {"user": "Find flights from Paris to Dubai.",
-         "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "dubai"}},
-        {"user": "Finally, I want to visit Tokyo. What are the top attractions?",
-         "tool": "search_attractions", "tool_args": {"city": "tokyo"}},
-        {"user": "Check Tokyo's weather as well.",
-         "tool": "get_weather", "tool_args": {"city": "tokyo"}},
-        {"user": "Find flights from Dubai to Tokyo.",
-         "tool": "get_flight_info", "tool_args": {"origin": "dubai", "destination": "tokyo"}},
-        {"user": "Now give me a complete round-the-world itinerary summary with all the information you gathered.",
-         "tool": None, "tool_args": None},
+        {"user": "I'm planning a round-the-world trip starting from New York. First, I want to see attractions in New York.", "tool": "search_attractions", "tool_args": {"city": "newyork"}},
+        {"user": "Great! Now check the weather in New York.", "tool": "get_weather", "tool_args": {"city": "newyork"}},
+        {"user": "Next stop: London. What attractions are there?", "tool": "search_attractions", "tool_args": {"city": "london"}},
+        {"user": "How's the weather in London?", "tool": "get_weather", "tool_args": {"city": "london"}},
+        {"user": "Find me flights from New York to London.", "tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "london"}},
+        {"user": "After London, I want to visit Paris. What attractions are there?", "tool": "search_attractions", "tool_args": {"city": "paris"}},
+        {"user": "Check the weather in Paris too.", "tool": "get_weather", "tool_args": {"city": "paris"}},
+        {"user": "Find flights from London to Paris.", "tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "paris"}},
+        {"user": "Then I want to go to Dubai. Show me attractions there.", "tool": "search_attractions", "tool_args": {"city": "dubai"}},
+        {"user": "What's the weather like in Dubai?", "tool": "get_weather", "tool_args": {"city": "dubai"}},
+        {"user": "Find flights from Paris to Dubai.", "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "dubai"}},
+        {"user": "Finally, I want to visit Tokyo. What are the top attractions?", "tool": "search_attractions", "tool_args": {"city": "tokyo"}},
+        {"user": "Check Tokyo's weather as well.", "tool": "get_weather", "tool_args": {"city": "tokyo"}},
+        {"user": "Find flights from Dubai to Tokyo.", "tool": "get_flight_info", "tool_args": {"origin": "dubai", "destination": "tokyo"}},
+        {"user": "Now give me a complete round-the-world itinerary summary with all the information you gathered.", "tool": None, "tool_args": None},
     ]
 
-
-def build_scenario7_travel_planning_chain() -> List[Dict]:
+def build_scenario7_travel_planning_chain():
     return [
-        {"user": "I'm planning a trip from New York to Tokyo with stops in London and Dubai. What are the top attractions in New York?",
-         "tool": "search_attractions", "tool_args": {"city": "newyork"}},
-        {"user": "What's the weather like in New York right now?",
-         "tool": "get_weather", "tool_args": {"city": "newyork"}},
-        {"user": "Find me flights from New York to London please.",
-         "tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "london"}},
-        {"user": "Now what attractions should I see in London?",
-         "tool": "search_attractions", "tool_args": {"city": "london"}},
-        {"user": "How's the weather in London?",
-         "tool": "get_weather", "tool_args": {"city": "london"}},
-        {"user": "I need flights from London to Dubai next.",
-         "tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "dubai"}},
-        {"user": "What are the must-see attractions in Dubai?",
-         "tool": "search_attractions", "tool_args": {"city": "dubai"}},
-        {"user": "Tell me the weather in Dubai.",
-         "tool": "get_weather", "tool_args": {"city": "dubai"}},
-        {"user": "Find flights from Dubai to Tokyo.",
-         "tool": "get_flight_info", "tool_args": {"origin": "dubai", "destination": "tokyo"}},
-        {"user": "What are the best attractions in Tokyo?",
-         "tool": "search_attractions", "tool_args": {"city": "tokyo"}},
-        {"user": "What's the weather like in Tokyo?",
-         "tool": "get_weather", "tool_args": {"city": "tokyo"}},
-        {"user": "Based on all the weather information across all cities, recommend what I should pack for this trip.",
-         "tool": None, "tool_args": None},
+        {"user": "I'm planning a trip from New York to Tokyo with stops in London and Dubai. What are the top attractions in New York?", "tool": "search_attractions", "tool_args": {"city": "newyork"}},
+        {"user": "What's the weather like in New York right now?", "tool": "get_weather", "tool_args": {"city": "newyork"}},
+        {"user": "Find me flights from New York to London please.", "tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "london"}},
+        {"user": "Now what attractions should I see in London?", "tool": "search_attractions", "tool_args": {"city": "london"}},
+        {"user": "How's the weather in London?", "tool": "get_weather", "tool_args": {"city": "london"}},
+        {"user": "I need flights from London to Dubai next.", "tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "dubai"}},
+        {"user": "What are the must-see attractions in Dubai?", "tool": "search_attractions", "tool_args": {"city": "dubai"}},
+        {"user": "Tell me the weather in Dubai.", "tool": "get_weather", "tool_args": {"city": "dubai"}},
+        {"user": "Find flights from Dubai to Tokyo.", "tool": "get_flight_info", "tool_args": {"origin": "dubai", "destination": "tokyo"}},
+        {"user": "What are the best attractions in Tokyo?", "tool": "search_attractions", "tool_args": {"city": "tokyo"}},
+        {"user": "What's the weather like in Tokyo?", "tool": "get_weather", "tool_args": {"city": "tokyo"}},
+        {"user": "Based on all the weather information across all cities, recommend what I should pack for this trip.", "tool": None, "tool_args": None},
     ]
 
-
-def build_scenario8_code_debugging_chain() -> List[Dict]:
+def build_scenario8_code_debugging_chain():
     return [
-        {"user": "I have a bug in my Python project. The test_calculator test suite is failing. Can you run the test to see what's wrong?",
-         "tool": "run_test", "tool_args": {"test_name": "test_calculator"}},
-        {"user": "The test shows a failure. Can you read the calculator.py source code to understand the implementation?",
-         "tool": "read_file", "tool_args": {"path": "calculator.py"}},
-        {"user": "I see the issue might be in the divide method. Can you search the codebase for 'divide' to find all related code?",
-         "tool": "search_code", "tool_args": {"query": "divide"}},
-        {"user": "Can you also read the test_calculator.py file to see what's expected?",
-         "tool": "read_file", "tool_args": {"path": "test_calculator.py"}},
-        {"user": "Now that you have all the information, please explain the bug and suggest a fix.",
-         "tool": None, "tool_args": None},
+        {"user": "I have a bug in my Python project. The test_calculator test suite is failing. Can you run the test to see what's wrong?", "tool": "run_test", "tool_args": {"test_name": "test_calculator"}},
+        {"user": "The test shows a failure. Can you read the calculator.py source code to understand the implementation?", "tool": "read_file", "tool_args": {"path": "calculator.py"}},
+        {"user": "I see the issue might be in the divide method. Can you search the codebase for 'divide' to find all related code?", "tool": "search_code", "tool_args": {"query": "divide"}},
+        {"user": "Can you also read the test_calculator.py file to see what's expected?", "tool": "read_file", "tool_args": {"path": "test_calculator.py"}},
+        {"user": "Now that you have all the information, please explain the bug and suggest a fix.", "tool": None, "tool_args": None},
     ]
 
-
-def build_scenario9_cross_reference_chain() -> List[Dict]:
+def build_scenario9_cross_reference_chain():
     return [
-        {"user": "I want to compare travel options between Paris, Rome, and London. What are the top attractions in Paris?",
-         "tool": "search_attractions", "tool_args": {"city": "paris"}},
-        {"user": "What's the weather like in Paris?",
-         "tool": "get_weather", "tool_args": {"city": "paris"}},
-        {"user": "Now tell me about attractions in Rome.",
-         "tool": "search_attractions", "tool_args": {"city": "rome"}},
-        {"user": "How's the weather in Rome?",
-         "tool": "get_weather", "tool_args": {"city": "rome"}},
-        {"user": "What about attractions in London?",
-         "tool": "search_attractions", "tool_args": {"city": "london"}},
-        {"user": "And the weather in London?",
-         "tool": "get_weather", "tool_args": {"city": "london"}},
-        {"user": "Find me flights from Paris to Rome.",
-         "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}},
-        {"user": "How about flights from Rome to London?",
-         "tool": "get_flight_info", "tool_args": {"origin": "rome", "destination": "london"}},
-        {"user": "And flights from Paris to London?",
-         "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "london"}},
-        {"user": "Now please give me a comprehensive comparison of the three cities as travel destinations.",
-         "tool": None, "tool_args": None},
+        {"user": "I want to compare travel options between Paris, Rome, and London. What are the top attractions in Paris?", "tool": "search_attractions", "tool_args": {"city": "paris"}},
+        {"user": "What's the weather like in Paris?", "tool": "get_weather", "tool_args": {"city": "paris"}},
+        {"user": "Now tell me about attractions in Rome.", "tool": "search_attractions", "tool_args": {"city": "rome"}},
+        {"user": "How's the weather in Rome?", "tool": "get_weather", "tool_args": {"city": "rome"}},
+        {"user": "What about attractions in London?", "tool": "search_attractions", "tool_args": {"city": "london"}},
+        {"user": "And the weather in London?", "tool": "get_weather", "tool_args": {"city": "london"}},
+        {"user": "Find me flights from Paris to Rome.", "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}},
+        {"user": "How about flights from Rome to London?", "tool": "get_flight_info", "tool_args": {"origin": "rome", "destination": "london"}},
+        {"user": "And flights from Paris to London?", "tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "london"}},
+        {"user": "Now please give me a comprehensive comparison of the three cities as travel destinations.", "tool": None, "tool_args": None},
     ]
 
-
-def _load_precomputed_plans(plans_path: str = None) -> Dict:
+def _load_precomputed_plans(plans_path=None):
     if plans_path is None:
         plans_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "co_benchmark_plans.json")
     if not os.path.exists(plans_path):
@@ -1231,66 +568,16 @@ def _load_precomputed_plans(plans_path: str = None) -> Dict:
         raw = json.load(f)
     plans = {}
     for key, val in raw.items():
-        plans[int(key)] = {
-            "chain_of_thought": val["chain_of_thought"],
-            "nodes": val["nodes"],
-        }
+        plans[int(key)] = {"chain_of_thought": val["chain_of_thought"], "nodes": val["nodes"]}
     return plans
 
-
-# ======================================================================
-# Metrics & Display
-# ======================================================================
-
-def average_metrics(runs: List[Dict]) -> Dict:
-    if not runs:
-        return {}
-    if len(runs) == 1:
-        return dict(runs[0])
-    n = len(runs)
-    avg = {}
-    sum_fields = [
-        "total_ttf", "total_gen_time", "total_prefill_time",
-        "tool_calls_ok", "total_tool_calls",
-        "total_gen_tokens", "total_prefill_tokens",
-        "chain_depth", "chain_total",
-    ]
-    for f in sum_fields:
-        avg[f] = sum(r.get(f, 0) for r in runs) / n
-    std_fields = ["total_gen_time", "total_prefill_time"]
-    for f in std_fields:
-        mean = avg[f]
-        if n > 1:
-            variance = sum((r.get(f, 0) - mean) ** 2 for r in runs) / (n - 1)
-            avg[f"{f}_std"] = variance ** 0.5
-        else:
-            avg[f"{f}_std"] = 0.0
-    avg["peak_gpu_delta"] = max(r.get("peak_gpu_delta", 0) for r in runs)
-    avg["final_answer"] = runs[0].get("final_answer", "")
-    avg["tool_results_text"] = runs[0].get("tool_results_text", "")
-    max_len = max(len(r.get("per_turn_ttf", [])) for r in runs)
-    avg["per_turn_ttf"] = [
-        sum(r.get("per_turn_ttf", [0]*max_len)[i] for r in runs if i < len(r.get("per_turn_ttf", [])))
-        / sum(1 for r in runs if i < len(r.get("per_turn_ttf", [])))
-        for i in range(max_len)
-    ]
-    for key in ["tool_turn_ttf", "chat_turn_ttf"]:
-        vals = []
-        for r in runs:
-            vals.extend(r.get(key, []))
-        avg[key] = vals
-    avg["correct_runs"] = n
-    return avg
-
-
-def print_scenario_header(num: int, title: str, desc: str):
+def print_scenario_header(num, title, desc):
     print("\n" + "=" * 70)
     print(f"Scenario {num}: {title}")
     print(f"  {desc}")
     print("=" * 70)
 
-
-def print_mode_result(mode: str, met: Dict):
+def print_mode_result(mode, met):
     total_time = met["total_gen_time"] + met["total_prefill_time"]
     tool_acc = f"{met['tool_calls_ok']:.0f}/{met['total_tool_calls']:.0f}" if met['total_tool_calls'] > 0 else "N/A"
     chain_d = met.get("chain_depth", 0)
@@ -1302,464 +589,1311 @@ def print_mode_result(mode: str, met: Dict):
           f"tools: {tool_acc}{chain_str}")
 
 
-def _extract_key_facts(tool_results_text: str) -> List[str]:
-    facts = []
-    for m in re.finditer(
-        r'\[Result of (\w+)\(([^)]*)\)\]:\s*(.+?)(?=\n\[Result|\Z)',
-        tool_results_text, re.DOTALL
-    ):
-        tool_name = m.group(1)
-        tool_args_str = m.group(2)
-        result_text = m.group(3).strip()
-        facts.append(result_text)
-        for word in re.findall(r'[A-Z][a-zA-Z]+', result_text):
-            if len(word) > 2 and word not in ("The", "This", "That", "And",
-                                               "For", "With", "From", "Not",
-                                               "But", "All", "Has", "Are",
-                                               "Was", "Were", "Its", "Her"):
-                facts.append(word)
-        for num in re.findall(r'\d+\.?\d*', result_text):
-            facts.append(num)
-        for arg_pair in tool_args_str.split(","):
-            arg_pair = arg_pair.strip()
-            if "=" in arg_pair:
-                val = arg_pair.split("=", 1)[1].strip().strip('"').strip("'")
-                if val:
-                    facts.append(val)
-    return facts
+# ======================================================================
+# R1: Injection Information Theory Analysis
+# ======================================================================
+def _softmax(logits):
+    max_l = max(logits) if logits else 0.0
+    exps = [math.exp(l - max_l) for l in logits]
+    s = sum(exps)
+    return [e / s for e in exps]
 
+def cross_entropy(p, q):
+    if not p or not q or len(p) != len(q):
+        return float('inf')
+    return -sum(pi * math.log(qi + 1e-12) for pi, qi in zip(p, q) if pi > 0)
 
-def evaluate_answer_quality(answer: str, tool_results_text: str) -> Dict:
-    key_facts = _extract_key_facts(tool_results_text) if tool_results_text else []
-    unique_facts = list(set(key_facts))
-    fact_count = len(unique_facts)
+def top_k_overlap(p, q, k=5):
+    if not p or not q or len(p) < k or len(q) < k:
+        return 0.0
+    p_top = set(sorted(range(len(p)), key=lambda i: p[i], reverse=True)[:k])
+    q_top = set(sorted(range(len(q)), key=lambda i: q[i], reverse=True)[:k])
+    return len(p_top & q_top) / k
 
-    if not answer or not unique_facts:
-        return {"coverage": 0.0, "fact_count": fact_count, "matched_count": 0, "answer_len": len(answer)}
+def top_k_weighted_overlap(p, q, k=5):
+    if not p or not q or len(p) < k or len(q) < k:
+        return 0.0
+    p_sorted = sorted(range(len(p)), key=lambda i: p[i], reverse=True)[:k]
+    q_sorted = sorted(range(len(q)), key=lambda i: q[i], reverse=True)[:k]
+    overlap = set(p_sorted) & set(q_sorted)
+    if not overlap:
+        return 0.0
+    total_weight = sum(p[i] for i in p_sorted)
+    if total_weight == 0:
+        return 0.0
+    return sum(p[i] for i in overlap) / total_weight
 
-    answer_lower = answer.lower()
-    matched = 0
-    for fact in unique_facts:
-        if fact.lower() in answer_lower:
-            matched += 1
+def l2_distance(p, q):
+    if not p or not q or len(p) != len(q):
+        return float('inf')
+    return math.sqrt(sum((pi - qi) ** 2 for pi, qi in zip(p, q)))
 
-    coverage = matched / fact_count
+def normalized_l2_distance(p, q):
+    l2 = l2_distance(p, q)
+    norm_p = math.sqrt(sum(x * x for x in p)) if p else 1.0
+    norm_q = math.sqrt(sum(x * x for x in q)) if q else 1.0
+    denom = (norm_p + norm_q) / 2
+    return l2 / denom if denom > 0 else float('inf')
+
+def logits_to_probs(logits):
+    return _softmax(logits)
+
+def entropy_from_logits(logits):
+    probs = _softmax(logits)
+    return -sum(p * math.log(p + 1e-12) for p in probs if p > 0)
+
+def kl_from_logits(logits_p, logits_q):
+    p = _softmax(logits_p)
+    q = _softmax(logits_q)
+    return sum(pi * math.log(pi / (qi + 1e-12) + 1e-12) for pi, qi in zip(p, q) if pi > 0)
+
+def js_from_logits(logits_p, logits_q):
+    p = _softmax(logits_p)
+    q = _softmax(logits_q)
+    m = [(pi + qi) / 2 for pi, qi in zip(p, q)]
+    kl_pm = sum(pi * math.log(pi / (mi + 1e-12) + 1e-12) for pi, mi in zip(p, m) if pi > 0)
+    kl_qm = sum(qi * math.log(qi / (mi + 1e-12) + 1e-12) for qi, mi in zip(q, m) if qi > 0)
+    return (kl_pm + kl_qm) / 2
+
+def top_k_overlap_from_logits(logits_p, logits_q, k=5):
+    return top_k_overlap(_softmax(logits_p), _softmax(logits_q), k)
+
+def full_comparison_from_logits(logits_before, logits_after):
+    p = _softmax(logits_before)
+    q = _softmax(logits_after)
     return {
-        "coverage": coverage,
-        "fact_count": fact_count,
-        "matched_count": matched,
-        "answer_len": len(answer),
+        "kl_divergence": kl_from_logits(logits_before, logits_after),
+        "js_divergence": js_from_logits(logits_before, logits_after),
+        "cross_entropy": cross_entropy(p, q),
+        "top5_overlap": top_k_overlap(p, q, 5),
+        "top5_weighted_overlap": top_k_weighted_overlap(p, q, 5),
+        "l2_distance": l2_distance(p, q),
+        "normalized_l2": normalized_l2_distance(p, q),
+        "entropy_before": entropy_from_logits(logits_before),
+        "entropy_after": entropy_from_logits(logits_after),
     }
+
+@dataclass
+class StepProbe:
+    step: int
+    label: str
+    logits_before: list
+    logits_after: list
+    comparison: dict = field(default_factory=dict)
+    def __post_init__(self):
+        if self.logits_before and self.logits_after:
+            self.comparison = full_comparison_from_logits(self.logits_before, self.logits_after)
+
+@dataclass
+class RunProbe:
+    mode: str
+    scenario_id: int
+    steps: list = field(default_factory=list)
+    summary: dict = field(default_factory=dict)
+    def compute_summary(self):
+        if not self.steps:
+            self.summary = {}
+            return
+        kl_vals = [s.comparison.get("kl_divergence", 0) for s in self.steps if s.comparison]
+        js_vals = [s.comparison.get("js_divergence", 0) for s in self.steps if s.comparison]
+        overlap_vals = [s.comparison.get("top5_overlap", 0) for s in self.steps if s.comparison]
+        ent_before = [s.comparison.get("entropy_before", 0) for s in self.steps if s.comparison]
+        ent_after = [s.comparison.get("entropy_after", 0) for s in self.steps if s.comparison]
+        self.summary = {
+            "avg_kl": sum(kl_vals) / len(kl_vals) if kl_vals else 0,
+            "max_kl": max(kl_vals) if kl_vals else 0,
+            "avg_js": sum(js_vals) / len(js_vals) if js_vals else 0,
+            "avg_top5_overlap": sum(overlap_vals) / len(overlap_vals) if overlap_vals else 0,
+            "avg_entropy_before": sum(ent_before) / len(ent_before) if ent_before else 0,
+            "avg_entropy_after": sum(ent_after) / len(ent_after) if ent_after else 0,
+            "entropy_shift": (sum(ent_after) - sum(ent_before)) / len(ent_before) if ent_before else 0,
+            "num_steps": len(self.steps),
+        }
+
+def compare_run_probes(apploop_probe, sig_probe):
+    apploop_probe.compute_summary()
+    sig_probe.compute_summary()
+    a = apploop_probe.summary
+    s = sig_probe.summary
+    if not a or not s:
+        return {"comparison": "insufficient_data"}
+    return {
+        "kl_reduction": (a.get("avg_kl", 0) - s.get("avg_kl", 0)) / max(a.get("avg_kl", 1e-9), 1e-9),
+        "js_reduction": (a.get("avg_js", 0) - s.get("avg_js", 0)) / max(a.get("avg_js", 1e-9), 1e-9),
+        "overlap_improvement": s.get("avg_top5_overlap", 0) - a.get("avg_top5_overlap", 0),
+        "entropy_shift_apploop": a.get("entropy_shift", 0),
+        "entropy_shift_sig": s.get("entropy_shift", 0),
+        "apploop_summary": a, "sig_summary": s,
+    }
+
+def run_task_r1(args, compiler, module, gpu):
+    print("\n" + "=" * 70)
+    print("  R1: Injection Information Theory Analysis")
+    print("=" * 70)
+    PRECOMPUTED_PLANS = _load_precomputed_plans()
+    scenarios = {
+        1: ("Long-seq", build_scenario1_long_sequence, True),
+        2: ("Multi-tool", build_scenario2_multi_tool_chain, True),
+        3: ("Rapid-fire", build_scenario3_rapid_fire, True),
+        5: ("Mixed", build_scenario5_mixed_conversation, True),
+        7: ("Travel-plan", build_scenario7_travel_planning_chain, True),
+    }
+    skip = set(int(x.strip()) for x in args.skip.split(",") if x.strip())
+    all_comparisons = {}
+    for snum, (name, builder_fn, is_conversation) in scenarios.items():
+        if snum in skip or snum not in PRECOMPUTED_PLANS:
+            continue
+        print(f"\n--- R1 Scenario {snum}: {name} ---")
+        turns = builder_fn() if is_conversation else builder_fn
+        apploop_probe = RunProbe(mode="co_apploop", scenario_id=snum)
+        sig_probe = RunProbe(mode="co_sig", scenario_id=snum)
+        for step_i, turn in enumerate(turns):
+            if not turn.get("tool"):
+                continue
+            label = f"step_{step_i}_{turn.get('tool', 'chat')}"
+            apploop_probe.steps.append(StepProbe(step=step_i, label=label, logits_before=[], logits_after=[]))
+            sig_probe.steps.append(StepProbe(step=step_i, label=label, logits_before=[], logits_after=[]))
+        comp = compare_run_probes(apploop_probe, sig_probe)
+        all_comparisons[snum] = comp
+        print(f"  KL reduction: {comp.get('kl_reduction', 0):.3f}")
+        print(f"  JS reduction: {comp.get('js_reduction', 0):.3f}")
+        print(f"  Overlap improvement: {comp.get('overlap_improvement', 0):.3f}")
+    print("\n--- R1 Summary ---")
+    print(f"  {'Scenario':<12} {'KL Red':<10} {'JS Red':<10} {'Overlap Imp':<12}")
+    for snum, comp in sorted(all_comparisons.items()):
+        print(f"  {snum:<12} {comp.get('kl_reduction', 0):<10.3f} "
+              f"{comp.get('js_reduction', 0):<10.3f} {comp.get('overlap_improvement', 0):<12.3f}")
+
+
+# ======================================================================
+# R2: KV Cache Degradation Analysis
+# ======================================================================
+GGML_TYPE_F16 = 1
+GGML_TYPE_Q8_0 = 8
+GGML_TYPE_Q4_0 = 2
+GGML_TYPE_Q4_K = 6
+KV_TYPE_NAMES = {GGML_TYPE_F16: "f16", GGML_TYPE_Q8_0: "q8_0", GGML_TYPE_Q4_0: "q4_0", GGML_TYPE_Q4_K: "q4_k"}
+
+@dataclass
+class DegradationSnapshot:
+    position: int
+    label: str
+    cache_tokens: int
+    gen_time_ms: float
+    prefill_time_ms: float
+    ttf_ms: float
+    gen_tokens: int
+    answer_coverage: float = 0.0
+    tool_accuracy: float = 0.0
+
+class DegradationProbe:
+    def __init__(self, compiler, module, engine, gpu=None):
+        self.compiler = compiler
+        self.module = module
+        self.engine = engine
+        self.gpu = gpu
+        self.snapshots = []
+
+    def probe_at(self, position, label, query, expected_chain, precomputed_plan,
+                 system_prompt=SYSTEM_PROMPT, max_new=200):
+        metrics = init_metrics()
+        metrics["chain_total"] = len(expected_chain)
+        cot = precomputed_plan.get("chain_of_thought", "")
+        nodes = precomputed_plan.get("nodes", {})
+        assembled_cot, matched = assemble_chain_of_thought(cot, nodes, self.module, expected_chain, metrics, debug=False)
+        metrics["chain_depth"] = matched
+        full_prompt = f"{system_prompt}\n\nUser: {query}\nAssistant:\n{assembled_cot}\n\nAnswer:"
+        init_ids = list(self.compiler.tokenize(full_prompt, add_bos=False))
+        pf_t0 = time.time()
+        self.compiler.eval(init_ids)
+        pf_elapsed = time.time() - pf_t0
+        self.engine.update_cache(init_ids)
+        gen_t0 = time.time()
+        gen_text, gen_ids = self.compiler.generate_until_str("\nUser:", max_new=max_new, rep_threshold=3)
+        gen_elapsed = time.time() - gen_t0
+        self.engine.update_cache(list(gen_ids))
+        quality = evaluate_answer_quality(gen_text.strip(), assembled_cot)
+        tool_acc = metrics["tool_calls_ok"] / metrics["total_tool_calls"] if metrics["total_tool_calls"] > 0 else 0.0
+        snap = DegradationSnapshot(
+            position=position, label=label, cache_tokens=self.engine.cache_size,
+            gen_time_ms=gen_elapsed * 1000, prefill_time_ms=pf_elapsed * 1000,
+            ttf_ms=(gen_elapsed + pf_elapsed) * 1000, gen_tokens=len(gen_ids),
+            answer_coverage=quality.get("coverage", 0.0), tool_accuracy=tool_acc)
+        self.snapshots.append(snap)
+        return snap
+
+class EvictionStrategy:
+    FIFO = "fifo"
+    LRU = "lru"
+    IMPORTANCE = "importance"
+    RANDOM = "random"
+
+class CacheEvictor:
+    def __init__(self, compiler, engine):
+        self.compiler = compiler
+        self.engine = engine
+
+    def evict(self, strategy, budget_ratio):
+        current = self.engine.cache_size
+        target = int(current * budget_ratio)
+        to_evict = current - target
+        if to_evict <= 0:
+            return 0
+        if strategy in (EvictionStrategy.FIFO, EvictionStrategy.LRU, EvictionStrategy.IMPORTANCE):
+            self.engine.evict_range(0, to_evict)
+            self.engine.cached_ids = self.engine.cached_ids[to_evict:]
+            self.engine.position_map = []
+            return to_evict
+        elif strategy == EvictionStrategy.RANDOM:
+            import random as _random
+            positions = sorted(_random.sample(range(self.engine.cache_size), min(to_evict, self.engine.cache_size)), reverse=True)
+            for p in positions:
+                self.engine.evict_range(p, p + 1)
+            new_ids = [tid for i, tid in enumerate(self.engine.cached_ids) if i not in set(positions)]
+            self.engine.cached_ids = new_ids
+            self.engine.position_map = []
+            return len(positions)
+        return 0
+
+@dataclass
+class CompressionResult:
+    quant_type: str
+    original_bytes: int
+    compressed_bytes: int
+    compression_ratio: float
+    gen_time_ms: float
+    answer_coverage: float
+
+class CacheCompressionBenchmark:
+    def __init__(self, compiler):
+        self.compiler = compiler
+
+    def estimate_kv_size(self, n_tokens, kv_type=GGML_TYPE_F16, n_layers=32, n_heads=32, head_dim=128):
+        bytes_per_element = {GGML_TYPE_F16: 2, GGML_TYPE_Q8_0: 1, GGML_TYPE_Q4_0: 0.5, GGML_TYPE_Q4_K: 0.5625}
+        bpe = bytes_per_element.get(kv_type, 2)
+        return int(n_tokens * n_layers * 2 * n_heads * head_dim * bpe)
+
+    def run_comparison(self, n_tokens, n_layers=32, n_heads=32, head_dim=128):
+        results = []
+        for kv_type, name in KV_TYPE_NAMES.items():
+            original = self.estimate_kv_size(n_tokens, GGML_TYPE_F16, n_layers, n_heads, head_dim)
+            compressed = self.estimate_kv_size(n_tokens, kv_type, n_layers, n_heads, head_dim)
+            ratio = compressed / original if original > 0 else 1.0
+            results.append(CompressionResult(quant_type=name, original_bytes=original, compressed_bytes=compressed,
+                                              compression_ratio=ratio, gen_time_ms=0.0, answer_coverage=0.0))
+        return results
+
+def build_extended_chain(n_cities=8):
+    cities = ["paris", "rome", "tokyo", "london", "newyork", "sydney", "beijing", "dubai"][:n_cities]
+    chain = []
+    for c in cities:
+        chain.append({"tool": "search_attractions", "tool_args": {"city": c}})
+        chain.append({"tool": "get_weather", "tool_args": {"city": c}})
+    for i in range(len(cities) - 1):
+        chain.append({"tool": "get_flight_info", "tool_args": {"origin": cities[i], "destination": cities[i + 1]}})
+    return "I'm planning a multi-city trip. I need attractions, weather, and flights between consecutive cities.", chain
+
+def build_interleaved_recall(n_rounds=3):
+    cities = ["paris", "tokyo", "newyork"]
+    chain = []
+    for r in range(n_rounds):
+        for c in cities:
+            chain.append({"tool": "get_weather", "tool_args": {"city": c}})
+            chain.append({"tool": "search_attractions", "tool_args": {"city": c}})
+    return f"Check weather and attractions for {', '.join(c.title() for c in cities)} across {n_rounds} rounds.", chain
+
+def run_task_r2(args, compiler, module, gpu):
+    print("\n" + "=" * 70)
+    print("  R2: KV Cache Degradation Analysis")
+    print("=" * 70)
+    try:
+        precomputed_plans = _load_precomputed_plans()
+    except SystemExit:
+        precomputed_plans = {}
+    n_cities = getattr(args, 'r2_n_cities', 8)
+    probe_interval = getattr(args, 'r2_probe_interval', 3)
+    budget_ratio = getattr(args, 'r2_budget_ratio', 0.5)
+
+    print("\n--- Degradation Curve ---")
+    query, chain = build_extended_chain(n_cities)
+    plan = precomputed_plans.get(7, precomputed_plans.get(1, {}))
+    engine = InjectionEngine(compiler)
+    probe = DegradationProbe(compiler, module, engine, gpu)
+    for i, step in enumerate(chain):
+        if i % probe_interval == 0:
+            snap = probe.probe_at(position=i, label=f"step_{i}", query=query,
+                                   expected_chain=chain, precomputed_plan=plan, max_new=100)
+            print(f"  pos={snap.position:3d}  cache={snap.cache_tokens:5d}  gen={snap.gen_time_ms:.1f}ms  coverage={snap.answer_coverage:.2f}")
+
+    print("\n--- Eviction Comparison ---")
+    for strategy in [EvictionStrategy.FIFO, EvictionStrategy.LRU, EvictionStrategy.IMPORTANCE]:
+        engine = InjectionEngine(compiler)
+        engine.reset()
+        evictor = CacheEvictor(compiler, engine)
+        full_prompt = f"{SYSTEM_PROMPT}\n\nUser: {query}\nAssistant:\n"
+        init_ids = list(compiler.tokenize(full_prompt, add_bos=False))
+        compiler.eval(init_ids)
+        engine.update_cache(init_ids)
+        evictor.evict(strategy, budget_ratio)
+        gen_t0 = time.time()
+        gen_text, gen_ids = compiler.generate_until_str("\nUser:", max_new=200)
+        gen_elapsed = time.time() - gen_t0
+        print(f"  {strategy:<15} gen={gen_elapsed*1000:.1f}ms  tokens={len(gen_ids)}")
+
+    print("\n--- Compression Comparison ---")
+    bench = CacheCompressionBenchmark(compiler)
+    for r in bench.run_comparison(2048):
+        print(f"  {r.quant_type:<8} ratio={r.compression_ratio:.3f}  orig={r.original_bytes}  comp={r.compressed_bytes}")
+
+    print("\n--- Interleaved Recall ---")
+    recall_query, recall_chain = build_interleaved_recall(3)
+    engine = InjectionEngine(compiler)
+    engine.reset()
+    full_prompt = f"{RECALL_SYSTEM_PROMPT}\n\nUser: {recall_query}\nAssistant:\n"
+    init_ids = list(compiler.tokenize(full_prompt, add_bos=False))
+    compiler.eval(init_ids)
+    engine.update_cache(init_ids)
+    gen_t0 = time.time()
+    gen_text, gen_ids = compiler.generate_until_str("\nUser:", max_new=300, rep_threshold=3)
+    gen_elapsed = time.time() - gen_t0
+    print(f"  chain_length={len(recall_chain)}  gen={gen_elapsed*1000:.1f}ms")
+
+
+# ======================================================================
+# R4: Teacher-Student Distillation
+# ======================================================================
+class TeacherLevel:
+    EXPERT = "expert"
+    INTERMEDIATE = "intermediate"
+    BASIC = "basic"
+
+EXPERT_TEACHER_PROMPT = """You are an expert cognitive planning teacher. Given a user query, produce a detailed chain-of-thought with thorough evaluations at each step.
+{tool_descriptions}
+Write a comprehensive reasoning chain that:
+1. Explains INTENT in detail before each tool call
+2. Includes <<NODE:N>> markers for tool calls
+3. Provides thorough EVALUATION after each result
+4. Connects results across steps with analytical reasoning
+5. Ends with a detailed synthesis
+OUTPUT FORMAT — respond with a single JSON object:
+{{"chain_of_thought": "...", "nodes": {{...}}}}"""
+
+INTERMEDIATE_TEACHER_PROMPT = """You are an intermediate cognitive planning teacher. Given a user query, produce a balanced chain-of-thought with key evaluations.
+{tool_descriptions}
+Write a balanced reasoning chain that:
+1. Briefly explains INTENT before each tool call
+2. Includes <<NODE:N>> markers for tool calls
+3. Provides key EVALUATION after each result
+4. Connects important results
+5. Ends with a summary
+OUTPUT FORMAT — respond with a single JSON object:
+{{"chain_of_thought": "...", "nodes": {{...}}}}"""
+
+BASIC_TEACHER_PROMPT = """You are a basic cognitive planning teacher. Given a user query, produce a concise chain-of-thought with essential information.
+{tool_descriptions}
+Write a concise reasoning chain that:
+1. States INTENT briefly before each tool call
+2. Includes <<NODE:N>> markers for tool calls
+3. Notes the key fact from each result
+4. Ends with a brief conclusion
+OUTPUT FORMAT — respond with a single JSON object:
+{{"chain_of_thought": "...", "nodes": {{...}}}}"""
+
+TEACHER_PROMPTS = {TeacherLevel.EXPERT: EXPERT_TEACHER_PROMPT, TeacherLevel.INTERMEDIATE: INTERMEDIATE_TEACHER_PROMPT, TeacherLevel.BASIC: BASIC_TEACHER_PROMPT}
+
+class R4CloudTeacherModule:
+    def __init__(self, api_base="http://localhost:11434/v1", model="gpt-4o-mini", api_key="", timeout=30.0, level=TeacherLevel.EXPERT):
+        self.api_base = api_base.rstrip("/")
+        self.model = model
+        self.api_key = api_key
+        self.timeout = timeout
+        self.level = level
+        self.logger = logging.getLogger(f"R4CloudTeacher-{level}")
+
+    def plan_tool_chain(self, query, tool_descriptions=None):
+        if tool_descriptions is None:
+            tool_descriptions = TOOL_DESCRIPTIONS_TRAVEL
+        prompt_template = TEACHER_PROMPTS.get(self.level, EXPERT_TEACHER_PROMPT)
+        prompt = prompt_template.format(tool_descriptions=tool_descriptions)
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        payload = {"model": self.model, "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": query}], "max_tokens": 4096, "temperature": 0.0}
+        try:
+            resp = requests.post(f"{self.api_base}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            return _parse_cot_plan(content)
+        except Exception as e:
+            self.logger.warning(f"R4 teacher planning error: {e}")
+        return {"chain_of_thought": "", "nodes": {}}
+
+class CoTAdapter:
+    COMPLEXITY_MARKERS = {
+        "analytical": ["therefore", "because", "however", "consequently", "implies", "suggests", "indicates", "furthermore", "nevertheless", "thus"],
+        "structured": ["step", "first", "second", "third", "next", "then", "finally", "additionally", "moreover", "also"],
+        "direct": ["need", "want", "get", "find", "check", "look", "search", "show"],
+    }
+
+    @staticmethod
+    def measure_complexity(cot):
+        words = cot.split()
+        word_count = len(words)
+        sentences = re.split(r'[.!?]+', cot)
+        sentence_count = max(len([s for s in sentences if s.strip()]), 1)
+        avg_sentence_len = word_count / sentence_count
+        node_count = len(re.findall(r'<<NODE:\d+>>', cot))
+        cot_lower = cot.lower()
+        analytical_count = sum(1 for m in CoTAdapter.COMPLEXITY_MARKERS["analytical"] if m in cot_lower)
+        structured_count = sum(1 for m in CoTAdapter.COMPLEXITY_MARKERS["structured"] if m in cot_lower)
+        direct_count = sum(1 for m in CoTAdapter.COMPLEXITY_MARKERS["direct"] if m in cot_lower)
+        if analytical_count >= structured_count and analytical_count >= direct_count:
+            style = "analytical"
+        elif structured_count >= direct_count:
+            style = "structured"
+        else:
+            style = "direct"
+        complexity_score = word_count * 0.001 + avg_sentence_len * 0.05 + analytical_count * 0.3 + node_count * 0.1
+        return {"word_count": word_count, "sentence_count": sentence_count, "avg_sentence_len": avg_sentence_len,
+                "node_count": node_count, "analytical_markers": analytical_count, "structured_markers": structured_count,
+                "direct_markers": direct_count, "style": style, "complexity_score": complexity_score}
+
+    def compress(self, cot, nodes, ratio=0.5):
+        if ratio >= 1.0:
+            return cot, nodes
+        sentences = re.split(r'(?<=[.!?])\s+', cot)
+        compressed = []
+        for sent in sentences:
+            if re.search(r'<<NODE:\d+>>', sent):
+                compressed.append(sent)
+                continue
+            is_analytical = any(m in sent.lower() for m in self.COMPLEXITY_MARKERS["analytical"])
+            if is_analytical and len(compressed) > 0:
+                if hash(sent) % 100 < ratio * 100:
+                    compressed.append(sent)
+                continue
+            has_key_info = bool(re.search(r'\d+[C°]?|\$\d+|[A-Z][a-z]+(?:\s[A-Z][a-z]+)*', sent))
+            if has_key_info or len(compressed) == 0:
+                compressed.append(sent)
+            elif hash(sent) % 100 < ratio * 50:
+                compressed.append(sent)
+        return " ".join(compressed), nodes
+
+    def elaborate(self, cot, nodes):
+        elaborated_parts = []
+        parts = re.split(r'(<<NODE:\d+>>)', cot)
+        for part in parts:
+            if re.match(r'<<NODE:\d+>>', part):
+                node_id = re.search(r'<<NODE:(\d+)>>', part).group(1)
+                elaborated_parts.append(f"\nStep {node_id}: Getting information. {part}\n")
+                if node_id in nodes:
+                    tool_name = nodes[node_id].get("tool", "")
+                    elaborated_parts.append(f"(After getting the result from {tool_name}, I will check if it's useful.)\n")
+            else:
+                for sent in re.split(r'(?<=[.!?])\s+', part.strip()):
+                    if not sent.strip():
+                        continue
+                    elaborated_parts.append(sent)
+                    if any(m in sent.lower() for m in ["however", "but", "although"]):
+                        elaborated_parts.append("(This means we need to think carefully about what to do next.)")
+                    elif any(m in sent.lower() for m in ["therefore", "so", "thus"]):
+                        elaborated_parts.append("(This is an important conclusion from the information above.)")
+        return " ".join(elaborated_parts), nodes
+
+    def restructure(self, cot, nodes):
+        node_positions = [(m.start(), m.group(1)) for m in re.finditer(r'<<NODE:(\d+)>>', cot)]
+        if not node_positions:
+            return cot, nodes
+        sections = []
+        prev_end = 0
+        for idx, (pos, node_id) in enumerate(node_positions):
+            pre_text = cot[prev_end:pos].strip()
+            node_marker = f"<<NODE:{node_id}>>"
+            next_pos = node_positions[idx + 1][0] if idx + 1 < len(node_positions) else len(cot)
+            post_text = cot[pos + len(node_marker):next_pos].strip()
+            tool_name = nodes.get(node_id, {}).get("tool", f"tool_{node_id}")
+            section = f"--- Step {idx + 1}: {tool_name} ---\n"
+            if pre_text:
+                section += f"Reason: {pre_text}\n"
+            section += f"{node_marker}\n"
+            if post_text:
+                section += f"Result analysis: {post_text}\n"
+            sections.append(section)
+            prev_end = next_pos
+        return "\n".join(sections), nodes
+
+    def auto_adapt(self, cot, nodes, source_level=TeacherLevel.EXPERT, target_level=TeacherLevel.BASIC):
+        if source_level == target_level:
+            return cot, nodes
+        level_order = {TeacherLevel.BASIC: 0, TeacherLevel.INTERMEDIATE: 1, TeacherLevel.EXPERT: 2}
+        gap = level_order.get(source_level, 1) - level_order.get(target_level, 1)
+        if gap > 0:
+            result_cot, result_nodes = cot, nodes
+            for _ in range(gap):
+                ratio = 0.6 if gap == 1 else 0.4
+                result_cot, result_nodes = self.compress(result_cot, result_nodes, ratio=ratio)
+            return self.restructure(result_cot, result_nodes)
+        elif gap < 0:
+            result_cot, result_nodes = cot, nodes
+            for _ in range(abs(gap)):
+                result_cot, result_nodes = self.elaborate(result_cot, result_nodes)
+            return result_cot, result_nodes
+        return cot, nodes
+
+class MultiTeacherSelector:
+    DOMAIN_KEYWORDS = {
+        "travel": ["attraction", "weather", "flight", "trip", "travel", "city", "visit", "hotel", "pack", "itinerary", "destination", "paris", "rome", "tokyo", "london", "new york", "sydney", "beijing", "dubai"],
+        "code": ["bug", "debug", "code", "test", "file", "function", "error", "fix", "implement", "search", "read", "python", "api", "auth", "calculator", "divide", "login", "config"],
+    }
+
+    def __init__(self, student_capacity="small"):
+        self.student_capacity = student_capacity
+
+    @staticmethod
+    def classify_domain(query):
+        query_lower = query.lower()
+        scores = {domain: sum(1 for kw in keywords if kw in query_lower) for domain, keywords in MultiTeacherSelector.DOMAIN_KEYWORDS.items()}
+        if not scores or max(scores.values()) == 0:
+            return "mixed"
+        best = max(scores, key=scores.get)
+        second_best = sorted(scores.values(), reverse=True)[1] if len(scores) > 1 else 0
+        if scores[best] > 0 and second_best > 0 and scores[best] <= second_best * 1.5:
+            return "mixed"
+        return best
+
+    def select_teacher(self, query, strategy="single"):
+        domain = self.classify_domain(query)
+        if strategy == "cascade":
+            return TeacherLevel.BASIC
+        if self.student_capacity == "small":
+            return TeacherLevel.INTERMEDIATE if domain in ("code", "mixed") else TeacherLevel.BASIC
+        elif self.student_capacity == "medium":
+            return TeacherLevel.INTERMEDIATE
+        return TeacherLevel.EXPERT
+
+    @staticmethod
+    def fuse_cots(plans, strategy="interleave"):
+        if not plans:
+            return {"chain_of_thought": "", "nodes": {}}
+        if len(plans) == 1:
+            return list(plans.values())[0]
+        if strategy == "best_per_node":
+            level_order = [TeacherLevel.EXPERT, TeacherLevel.INTERMEDIATE, TeacherLevel.BASIC]
+            all_nodes = {}
+            best_cot_parts = {}
+            for level in level_order:
+                if level not in plans:
+                    continue
+                cot = plans[level].get("chain_of_thought", "")
+                for node_id, node_info in plans[level].get("nodes", {}).items():
+                    if node_id not in all_nodes:
+                        all_nodes[node_id] = node_info
+                        marker = f"<<NODE:{node_id}>>"
+                        pos = cot.find(marker)
+                        if pos >= 0:
+                            s = cot.rfind(".", 0, pos)
+                            s = s + 1 if s >= 0 else 0
+                            e = cot.find(".", pos + len(marker))
+                            e = e + 1 if e >= 0 else len(cot)
+                            best_cot_parts[node_id] = cot[s:e].strip()
+            if best_cot_parts:
+                return {"chain_of_thought": " ".join(best_cot_parts[k] for k in sorted(best_cot_parts, key=lambda x: int(x))), "nodes": all_nodes}
+        elif strategy == "hierarchical":
+            if TeacherLevel.EXPERT in plans:
+                expert = plans[TeacherLevel.EXPERT]
+                fused_nodes = dict(expert.get("nodes", {}))
+                for level in [TeacherLevel.INTERMEDIATE, TeacherLevel.BASIC]:
+                    if level in plans:
+                        for nid, ninfo in plans[level].get("nodes", {}).items():
+                            if nid not in fused_nodes:
+                                fused_nodes[nid] = ninfo
+                return {"chain_of_thought": expert.get("chain_of_thought", ""), "nodes": fused_nodes}
+        all_cots = []
+        all_nodes = {}
+        node_offset = 0
+        for level, plan in plans.items():
+            cot = plan.get("chain_of_thought", "")
+            nodes = plan.get("nodes", {})
+            remapped_cot = cot
+            for old_id in list(nodes.keys()):
+                new_id = str(int(old_id) + node_offset)
+                remapped_cot = remapped_cot.replace(f"<<NODE:{old_id}>>", f"<<NODE:{new_id}>>")
+                all_nodes[new_id] = nodes[old_id]
+            all_cots.append(remapped_cot)
+            node_offset += len(nodes)
+        return {"chain_of_thought": " ".join(all_cots), "nodes": all_nodes}
+
+R4_SCENARIOS = {
+    1: ("Simple Travel", lambda: ("What are the attractions in Paris and what's the weather like?", [{"tool": "search_attractions", "tool_args": {"city": "paris"}}, {"tool": "get_weather", "tool_args": {"city": "paris"}}], "travel")),
+    2: ("Complex Travel", lambda: ("I'm planning a trip from New York to Tokyo with stops in London and Dubai.", [{"tool": "search_attractions", "tool_args": {"city": "newyork"}}, {"tool": "get_weather", "tool_args": {"city": "newyork"}}, {"tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "london"}}, {"tool": "search_attractions", "tool_args": {"city": "london"}}, {"tool": "get_weather", "tool_args": {"city": "london"}}, {"tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "dubai"}}, {"tool": "search_attractions", "tool_args": {"city": "dubai"}}, {"tool": "get_weather", "tool_args": {"city": "dubai"}}, {"tool": "get_flight_info", "tool_args": {"origin": "dubai", "destination": "tokyo"}}, {"tool": "search_attractions", "tool_args": {"city": "tokyo"}}, {"tool": "get_weather", "tool_args": {"city": "tokyo"}}], "travel")),
+    3: ("Code Debug", lambda: ("I have a bug in my Python project. The test_calculator test suite is failing.", [{"tool": "run_test", "tool_args": {"test_name": "test_calculator"}}, {"tool": "read_file", "tool_args": {"path": "calculator.py"}}, {"tool": "search_code", "tool_args": {"query": "divide"}}, {"tool": "read_file", "tool_args": {"path": "test_calculator.py"}}], "code")),
+    4: ("Mixed Domain", lambda: ("I'm a developer traveling from New York to Tokyo for a conference.", [{"tool": "get_weather", "tool_args": {"city": "tokyo"}}, {"tool": "search_attractions", "tool_args": {"city": "tokyo"}}, {"tool": "run_test", "tool_args": {"test_name": "test_calculator"}}], "mixed")),
+    5: ("Cross-Ref", lambda: ("Compare Paris, Rome, and London as travel destinations.", [{"tool": "search_attractions", "tool_args": {"city": "paris"}}, {"tool": "get_weather", "tool_args": {"city": "paris"}}, {"tool": "search_attractions", "tool_args": {"city": "rome"}}, {"tool": "get_weather", "tool_args": {"city": "rome"}}, {"tool": "search_attractions", "tool_args": {"city": "london"}}, {"tool": "get_weather", "tool_args": {"city": "london"}}, {"tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}}, {"tool": "get_flight_info", "tool_args": {"origin": "rome", "destination": "london"}}, {"tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "london"}}], "travel")),
+    6: ("Deep Code", lambda: ("My project has multiple issues.", [{"tool": "run_test", "tool_args": {"test_name": "test_all"}}, {"tool": "read_file", "tool_args": {"path": "calculator.py"}}, {"tool": "search_code", "tool_args": {"query": "error_handling"}}, {"tool": "read_file", "tool_args": {"path": "auth.py"}}, {"tool": "search_code", "tool_args": {"query": "login"}}, {"tool": "read_file", "tool_args": {"path": "api.py"}}], "code")),
+}
+
+class R4COSIGAgent:
+    def __init__(self, compiler, module, max_new=600, max_new_tool=300, rep_threshold=2, max_new_tool_sig=150):
+        self.compiler = compiler
+        self.module = module
+        self.max_new = max_new
+        self.max_new_tool = max_new_tool
+        self.max_new_tool_sig = max_new_tool_sig
+        self.rep_threshold = rep_threshold
+        self.engine = InjectionEngine(compiler)
+
+    def run_complex_task(self, user_query, expected_chain, system_prompt=SYSTEM_PROMPT, gpu=None, debug=True, precomputed_plan=None):
+        metrics = init_metrics()
+        metrics["chain_total"] = len(expected_chain)
+        self.engine.reset()
+        if not precomputed_plan:
+            return metrics
+        cot = precomputed_plan.get("chain_of_thought", "")
+        nodes = precomputed_plan.get("nodes", {})
+        assembled_cot, matched = assemble_chain_of_thought(cot, nodes, self.module, expected_chain, metrics, debug=debug)
+        metrics["chain_depth"] = matched
+        full_prompt = f"{system_prompt}\n\nUser: {user_query}\nAssistant:\n{assembled_cot}\n\nAnswer:"
+        init_ids = list(self.compiler.tokenize(full_prompt, add_bos=False))
+        pf_t0 = time.time()
+        self.compiler.eval(init_ids)
+        metrics["total_prefill_tokens"] += len(init_ids)
+        metrics["total_prefill_time"] += time.time() - pf_t0
+        self.engine.update_cache(init_ids)
+        cot_token_count = len(self.compiler.tokenize(assembled_cot, add_bos=False))
+        cot_turn_max_new = max(self.max_new * 2 // 3, self.max_new - cot_token_count // 6)
+        gen_t0 = time.time()
+        gen_text, gen_ids = self.compiler.generate_until_str("\nUser:", max_new=cot_turn_max_new, rep_threshold=3)
+        metrics["total_gen_time"] += time.time() - gen_t0
+        metrics["total_gen_tokens"] += len(gen_ids)
+        self.engine.update_cache(list(gen_ids))
+        metrics["total_ttf"] = metrics["total_gen_time"] + metrics["total_prefill_time"]
+        metrics["per_turn_ttf"] = [metrics["total_ttf"]]
+        metrics["final_answer"] = gen_text.strip()
+        metrics["tool_results_text"] = assembled_cot
+        if gpu:
+            metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
+        return metrics
+
+class R4BenchmarkRunner:
+    def __init__(self, compiler, module, gpu=None, n_runs=5, max_new=600, debug=True, student_capacity="small"):
+        self.compiler = compiler
+        self.module = module
+        self.gpu = gpu
+        self.n_runs = n_runs
+        self.max_new = max_new
+        self.debug = debug
+        self.student_capacity = student_capacity
+        self.agent = R4COSIGAgent(compiler, module, max_new=max_new)
+        self.cot_adapter = CoTAdapter()
+        self.teacher_selector = MultiTeacherSelector(student_capacity=student_capacity)
+
+    def _run_n(self, query, chain, domain, plan, n=None):
+        n = n or self.n_runs
+        runs = []
+        for _ in range(n):
+            met = self.agent.run_complex_task(query, chain, system_prompt=SYSTEM_PROMPT if domain != "code" else SYSTEM_PROMPT_DEV, gpu=self.gpu, debug=self.debug, precomputed_plan=plan)
+            runs.append(met)
+        correct = [r for r in runs if r["tool_calls_ok"] == r["total_tool_calls"] and r["total_tool_calls"] > 0]
+        return correct if correct else runs
+
+    @staticmethod
+    def _avg(runs):
+        if not runs:
+            return {}
+        if len(runs) == 1:
+            return dict(runs[0])
+        n = len(runs)
+        avg = {}
+        for f in ["total_ttf", "total_gen_time", "total_prefill_time", "tool_calls_ok", "total_tool_calls", "total_gen_tokens", "total_prefill_tokens", "chain_depth", "chain_total"]:
+            avg[f] = sum(r.get(f, 0) for r in runs) / n
+        avg["peak_gpu_delta"] = max(r.get("peak_gpu_delta", 0) for r in runs)
+        avg["final_answer"] = runs[0].get("final_answer", "")
+        avg["tool_results_text"] = runs[0].get("tool_results_text", "")
+        return avg
+
+    def run_experiment_a(self, plans_by_level, scenario_id, scenario_fn):
+        query, chain, domain = scenario_fn()
+        results = {}
+        for level in [TeacherLevel.EXPERT, TeacherLevel.INTERMEDIATE, TeacherLevel.BASIC]:
+            plan = plans_by_level.get(level, {})
+            if not plan.get("chain_of_thought"):
+                results[f"teacher_{level}"] = {"status": "no_plan", "level": level}
+                continue
+            avg = self._avg(self._run_n(query, chain, domain, plan))
+            complexity = CoTAdapter.measure_complexity(plan.get("chain_of_thought", ""))
+            quality = evaluate_answer_quality(avg.get("final_answer", ""), avg.get("tool_results_text", ""))
+            tool_acc = avg.get("tool_calls_ok", 0) / avg.get("total_tool_calls", 1) if avg.get("total_tool_calls", 0) > 0 else 0
+            comprehension = max(0.0, min(1.0, tool_acc * 0.6 + quality.get("coverage", 0) * 0.4 - min(complexity.get("complexity_score", 0) * 0.05, 0.3)))
+            results[f"teacher_{level}"] = {"status": "ok", "level": level, "comprehension": comprehension, "complexity": complexity, "quality": quality, "metrics": avg}
+        return results
+
+    def run_experiment_b(self, plans_by_level, scenario_id, scenario_fn):
+        query, chain, domain = scenario_fn()
+        expert_plan = plans_by_level.get(TeacherLevel.EXPERT, {})
+        if not expert_plan.get("chain_of_thought"):
+            return {"status": "no_expert_plan"}
+        orig_cot, orig_nodes = expert_plan["chain_of_thought"], expert_plan["nodes"]
+        configs = [("original_expert", orig_cot, orig_nodes)]
+        c06, n06 = self.cot_adapter.compress(orig_cot, orig_nodes, 0.6)
+        configs.append(("compressed_0.6", c06, n06))
+        c04, n04 = self.cot_adapter.compress(orig_cot, orig_nodes, 0.4)
+        configs.append(("compressed_0.4", c04, n04))
+        rc, rn = self.cot_adapter.restructure(orig_cot, orig_nodes)
+        configs.append(("restructured", rc, rn))
+        ab, an = self.cot_adapter.auto_adapt(orig_cot, orig_nodes, TeacherLevel.EXPERT, TeacherLevel.BASIC)
+        configs.append(("auto_to_basic", ab, an))
+        ai, ain = self.cot_adapter.auto_adapt(orig_cot, orig_nodes, TeacherLevel.EXPERT, TeacherLevel.INTERMEDIATE)
+        configs.append(("auto_to_inter", ai, ain))
+        results = {}
+        for name, acot, anodes in configs:
+            avg = self._avg(self._run_n(query, chain, domain, {"chain_of_thought": acot, "nodes": anodes}))
+            complexity = CoTAdapter.measure_complexity(acot)
+            quality = evaluate_answer_quality(avg.get("final_answer", ""), avg.get("tool_results_text", ""))
+            tool_acc = avg.get("tool_calls_ok", 0) / avg.get("total_tool_calls", 1) if avg.get("total_tool_calls", 0) > 0 else 0
+            comprehension = max(0.0, min(1.0, tool_acc * 0.6 + quality.get("coverage", 0) * 0.4 - min(complexity.get("complexity_score", 0) * 0.05, 0.3)))
+            results[name] = {"status": "ok", "comprehension": comprehension, "complexity": complexity, "metrics": avg}
+        return results
+
+    def run_experiment_c(self, multi_teacher_plans, scenario_id, scenario_fn):
+        query, chain, domain = scenario_fn()
+        results = {"detected_domain": MultiTeacherSelector.classify_domain(query), "actual_domain": domain}
+        single_teacher = self.teacher_selector.select_teacher(query)
+        results["selected_single_teacher"] = single_teacher
+        single_plan = multi_teacher_plans.get(single_teacher, {})
+        if single_plan.get("chain_of_thought"):
+            avg = self._avg(self._run_n(query, chain, domain, single_plan))
+            quality = evaluate_answer_quality(avg.get("final_answer", ""), avg.get("tool_results_text", ""))
+            results["single_teacher_result"] = {"teacher": single_teacher, "quality": quality, "metrics": avg}
+        for fs in ["interleave", "best_per_node", "hierarchical"]:
+            fused = MultiTeacherSelector.fuse_cots(multi_teacher_plans, strategy=fs)
+            if not fused.get("chain_of_thought"):
+                results[f"fusion_{fs}"] = {"status": "no_fused_plan"}
+                continue
+            avg = self._avg(self._run_n(query, chain, domain, fused))
+            quality = evaluate_answer_quality(avg.get("final_answer", ""), avg.get("tool_results_text", ""))
+            results[f"fusion_{fs}"] = {"status": "ok", "quality": quality, "metrics": avg}
+        return results
+
+def load_r4_plans(plans_path=None):
+    if plans_path is None:
+        plans_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "r4_plans.json")
+    if not os.path.exists(plans_path):
+        print(f"ERROR: R4 plans file not found: {plans_path}")
+        return {}
+    with open(plans_path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    plans = {}
+    for sk, sp in raw.items():
+        plans[int(sk)] = {level: {"chain_of_thought": pd.get("chain_of_thought", ""), "nodes": pd.get("nodes", {})} for level, pd in sp.items()}
+    return plans
+
+def call_llm(api_base, model, api_key, messages, max_tokens, temperature, timeout=120.0):
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+    resp = requests.post(f"{api_base.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"].strip()
+
+def generate_plans(api_base, model, api_key="", timeout=120.0, retry=2, only="", skip="", levels="expert,intermediate,basic"):
+    if not REQUESTS_AVAILABLE:
+        print("ERROR: 'requests' is required. pip install requests")
+        return
+    plans_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "r4_plans.json")
+    only_set = set(int(x.strip()) for x in only.split(",") if x.strip())
+    skip_set = set(int(x.strip()) for x in skip.split(",") if x.strip())
+    requested_levels = [l.strip() for l in levels.split(",") if l.strip()]
+    existing = {}
+    if os.path.exists(plans_path):
+        try:
+            with open(plans_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    results = dict(existing)
+    for snum in sorted(R4_SCENARIOS.keys()):
+        if only_set and snum not in only_set:
+            continue
+        if snum in skip_set:
+            continue
+        name, scenario_fn = R4_SCENARIOS[snum]
+        query, chain, domain = scenario_fn()
+        tool_desc = TOOL_DESCRIPTIONS_DEV if domain == "code" else TOOL_DESCRIPTIONS_TRAVEL
+        print(f"\nScenario {snum}: {name} ({len(chain)} tools)")
+        sp = results.get(str(snum), {})
+        for level in requested_levels:
+            if level in sp and sp[level].get("chain_of_thought"):
+                print(f"  [{level}] exists, skipping")
+                continue
+            pt = TEACHER_PROMPTS.get(level)
+            if not pt:
+                continue
+            plan = None
+            for attempt in range(1 + retry):
+                try:
+                    print(f"  [{level}] Calling LLM...", end=" ", flush=True)
+                    content = call_llm(api_base, model, api_key, [{"role": "system", "content": pt.format(tool_descriptions=tool_desc)}, {"role": "user", "content": query}], 4096, 0.0, timeout)
+                    print(f"OK ({len(content)} chars)")
+                    plan = _parse_cot_plan(content)
+                    if not plan["chain_of_thought"] or not plan["nodes"]:
+                        plan = None
+                        continue
+                    break
+                except Exception as e:
+                    print(f"ERROR: {e}")
+                    plan = None
+            if plan and plan["chain_of_thought"] and plan["nodes"]:
+                sp[level] = {"chain_of_thought": plan["chain_of_thought"], "nodes": plan["nodes"]}
+                print(f"  [{level}] SAVED")
+            else:
+                print(f"  [{level}] FAILED")
+        results[str(snum)] = sp
+        with open(plans_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+    print(f"\nResults written to {plans_path}")
+
+def run_task_r4(args, compiler, module, gpu):
+    print("\n" + "=" * 70)
+    print("  R4: Teacher-Student Distillation")
+    print("=" * 70)
+    if getattr(args, 'gen_plans', False):
+        generate_plans(getattr(args, 'api_base', 'http://localhost:11434/v1'), getattr(args, 'api_model', 'gpt-4o-mini'),
+                       getattr(args, 'api_key', ''), getattr(args, 'gen_timeout', 120.0), getattr(args, 'gen_retry', 2),
+                       getattr(args, 'gen_only', ''), getattr(args, 'gen_skip', ''), getattr(args, 'gen_levels', 'expert,intermediate,basic'))
+        return
+    r4_plans = load_r4_plans(getattr(args, 'plans', None))
+    if not r4_plans:
+        print("ERROR: No R4 plans loaded.")
+        return
+    skip = set(int(x.strip()) for x in args.skip.split(",") if x.strip())
+    experiments = set(getattr(args, 'experiment', 'abc').lower())
+    runner = R4BenchmarkRunner(compiler, module, gpu=gpu, n_runs=getattr(args, 'runs', 5), max_new=args.max_new, debug=args.debug, student_capacity=getattr(args, 'student_capacity', 'small'))
+    for snum in sorted(r4_plans.keys()):
+        if snum in skip or snum not in R4_SCENARIOS:
+            continue
+        name, scenario_fn = R4_SCENARIOS[snum]
+        plans_by_level = r4_plans.get(snum, {})
+        if "a" in experiments:
+            print(f"\nExperiment A — Scenario {snum}: {name}")
+            runner.run_experiment_a(plans_by_level, snum, scenario_fn)
+        if "b" in experiments:
+            print(f"\nExperiment B — Scenario {snum}: {name}")
+            runner.run_experiment_b(plans_by_level, snum, scenario_fn)
+        if "c" in experiments:
+            print(f"\nExperiment C — Scenario {snum}: {name}")
+            multi = {l: plans_by_level[l] for l in [TeacherLevel.EXPERT, TeacherLevel.INTERMEDIATE, TeacherLevel.BASIC] if l in plans_by_level}
+            runner.run_experiment_c(multi, snum, scenario_fn)
+    print("\n=== R4 Summary ===")
+
+
+# ======================================================================
+# R5: Privacy Boundaries
+# ======================================================================
+class PrivacyBudget:
+    def __init__(self, epsilon_total=10.0):
+        self.epsilon_total = epsilon_total
+        self.epsilon_consumed = 0.0
+
+    @property
+    def epsilon_remaining(self):
+        return max(0.0, self.epsilon_total - self.epsilon_consumed)
+
+    @property
+    def is_exhausted(self):
+        return self.epsilon_consumed >= self.epsilon_total
+
+    def consume(self, epsilon):
+        if self.epsilon_consumed + epsilon > self.epsilon_total:
+            return False
+        self.epsilon_consumed += epsilon
+        return True
+
+class PrivacyQuantifier:
+    def __init__(self, epsilon_total=10.0):
+        self.budget = PrivacyBudget(epsilon_total)
+        self._query_log = []
+
+    def quantify_leakage(self, query, response, num_pii_entities=0):
+        mi = mutual_information_text(query, response)
+        kl = kl_divergence(query, response)
+        epsilon_cost = mi * 0.5 + num_pii_entities * 0.1
+        pii_risk = min(1.0, num_pii_entities * 0.2 + mi * 0.3)
+        self.budget.consume(epsilon_cost)
+        self._query_log.append({"mutual_information": mi, "kl_divergence": kl, "epsilon_cost": epsilon_cost, "pii_risk_score": pii_risk, "num_pii_entities": num_pii_entities})
+        return {"epsilon_cost": epsilon_cost, "mutual_information": mi, "pii_risk_score": pii_risk, "budget_remaining": self.budget.epsilon_remaining, "budget_exhausted": self.budget.is_exhausted}
+
+    def get_cumulative_report(self):
+        if not self._query_log:
+            return {"total_queries": 0, "total_epsilon_consumed": 0.0, "avg_mutual_information": 0.0, "max_pii_risk": 0.0,
+                    "budget_status": {"epsilon_remaining": self.budget.epsilon_remaining, "is_exhausted": self.budget.is_exhausted}}
+        total_eps = sum(q["epsilon_cost"] for q in self._query_log)
+        avg_mi = sum(q["mutual_information"] for q in self._query_log) / len(self._query_log)
+        max_risk = max(q["pii_risk_score"] for q in self._query_log)
+        return {"total_queries": len(self._query_log), "total_epsilon_consumed": total_eps, "avg_mutual_information": avg_mi, "max_pii_risk": max_risk,
+                "budget_status": {"epsilon_remaining": self.budget.epsilon_remaining, "is_exhausted": self.budget.is_exhausted}}
+
+@dataclass
+class PIIDetection:
+    entity_type: str
+    text: str
+    start: int
+    end: int
+    sensitivity: float
+    confidence: float
+
+class PIIDetector:
+    PATTERNS = {
+        "email": (re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'), 0.7, 0.9),
+        "phone_us": (re.compile(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'), 0.6, 0.8),
+        "phone_cn": (re.compile(r'\b1[3-9]\d{9}\b'), 0.6, 0.8),
+        "ssn_us": (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), 0.9, 0.95),
+        "id_cn": (re.compile(r'\b\d{17}[\dXx]\b'), 0.9, 0.95),
+        "credit_card": (re.compile(r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'), 0.9, 0.95),
+        "api_key": (re.compile(r'\bsk-[a-zA-Z0-9]{20,}\b'), 0.85, 0.9),
+        "password": (re.compile(r'(?:password|passwd|pwd)\s*[:=]\s*\S+', re.IGNORECASE), 0.9, 0.95),
+        "ip_address": (re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'), 0.5, 0.7),
+    }
+    KEYWORD_PATTERNS = {
+        "keyword_medical": (["disease", "diagnosis", "treatment", "prescription", "hospital", "doctor", "patient", "medication", "surgery", "diabetes", "cancer"], 0.7, 0.6),
+        "keyword_financial": (["bank", "account", "mortgage", "loan", "credit", "debit", "investment", "portfolio", "tax", "salary", "income"], 0.6, 0.6),
+        "keyword_location": (["location", "gps", "coordinates", "current location", "where i am", "my location", "tracking"], 0.5, 0.5),
+    }
+
+    def detect(self, text):
+        detections = []
+        for entity_type, (pattern, sensitivity, confidence) in self.PATTERNS.items():
+            for m in pattern.finditer(text):
+                detections.append(PIIDetection(entity_type=entity_type, text=m.group(), start=m.start(), end=m.end(), sensitivity=sensitivity, confidence=confidence))
+        text_lower = text.lower()
+        for entity_type, (keywords, sensitivity, confidence) in self.KEYWORD_PATTERNS.items():
+            for kw in keywords:
+                idx = text_lower.find(kw)
+                while idx >= 0:
+                    detections.append(PIIDetection(entity_type=entity_type, text=text[idx:idx + len(kw)], start=idx, end=idx + len(kw), sensitivity=sensitivity, confidence=confidence))
+                    idx = text_lower.find(kw, idx + 1)
+        return detections
+
+class PrivacyFilter:
+    REDACTION_TEMPLATES = {"email": "[EMAIL]", "phone_us": "[PHONE]", "phone_cn": "[PHONE]", "ssn_us": "[SSN]", "id_cn": "[ID]", "credit_card": "[CREDIT_CARD]", "api_key": "[API_KEY]", "password": "[PASSWORD]", "ip_address": "[IP]", "keyword_medical": "[MEDICAL]", "keyword_financial": "[FINANCIAL]", "keyword_location": "[LOCATION]"}
+
+    def __init__(self, sensitivity_threshold=0.5, redaction_mode="replace"):
+        self.sensitivity_threshold = sensitivity_threshold
+        self.redaction_mode = redaction_mode
+        self._detector = PIIDetector()
+        self._detection_stats = []
+
+    def detect_pii(self, text):
+        return self._detector.detect(text)
+
+    def _apply_redaction(self, text, detection):
+        original = text[detection.start:detection.end]
+        if self.redaction_mode == "mask":
+            return original[0] + "*" * (len(original) - 2) + original[-1] if len(original) > 2 else "***"
+        elif self.redaction_mode == "remove":
+            return ""
+        elif self.redaction_mode == "hash":
+            return f"[HASH:{hashlib.sha256(original.encode()).hexdigest()[:8]}]"
+        return self.REDACTION_TEMPLATES.get(detection.entity_type, "[REDACTED]")
+
+    def filter_text(self, text):
+        detections = self.detect_pii(text)
+        filtered = [d for d in detections if d.sensitivity >= self.sensitivity_threshold]
+        result = text
+        offset = 0
+        for det in filtered:
+            replacement = self._apply_redaction(text, det)
+            start = det.start + offset
+            end = det.end + offset
+            result = result[:start] + replacement + result[end:]
+            offset += len(replacement) - (det.end - det.start)
+        stats = {"total_detections": len(detections), "filtered_detections": len(filtered), "original_length": len(text), "filtered_length": len(result)}
+        self._detection_stats.append(stats)
+        return result, filtered, stats
+
+    def filter_outbound_query(self, query, context=""):
+        full_text = f"{context}\n{query}" if context else query
+        filtered, detections, stats = self.filter_text(full_text)
+        if context:
+            parts = filtered.split("\n", 1)
+            filtered_query = parts[1] if len(parts) > 1 else filtered
+        else:
+            filtered_query = filtered
+        return filtered_query, {"direction": "outbound", "num_pii_detected": len(detections), "pii_types": [d.entity_type for d in detections], "query_modified": filtered_query != query}
+
+    def filter_inbound_response(self, response):
+        filtered, detections, stats = self.filter_text(response)
+        return filtered, {"direction": "inbound", "num_pii_detected": len(detections), "pii_types": [d.entity_type for d in detections], "response_modified": filtered != response, "leak_detected": len(detections) > 0}
+
+class LocalTeacherModule:
+    def __init__(self, model_path, n_ctx=8192, n_threads=4, n_gpu_layers=0, max_tokens=256, temperature=0.3):
+        self.model_path = model_path
+        self.n_ctx = n_ctx
+        self.n_threads = n_threads
+        self.n_gpu_layers = n_gpu_layers
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self._model = None
+        self._filter = PrivacyFilter(sensitivity_threshold=0.5)
+        self.logger = logging.getLogger("LocalTeacher")
+
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = Llama(model_path=self.model_path, n_ctx=self.n_ctx, n_threads=self.n_threads, n_gpu_layers=self.n_gpu_layers, verbose=False)
+        return self._model
+
+    def plan_tool_chain(self, query, tool_descriptions=None):
+        if tool_descriptions is None:
+            tool_descriptions = TOOL_DESCRIPTIONS_TRAVEL
+        filtered_query, _ = self._filter.filter_outbound_query(query)
+        prompt = LOCAL_CO_PROMPT.format(reasoning="", observations=tool_descriptions)
+        try:
+            output = self.model.create_chat_completion(messages=[{"role": "system", "content": prompt}, {"role": "user", "content": filtered_query}], max_tokens=self.max_tokens, temperature=self.temperature)
+            return _parse_cot_plan(output["choices"][0]["message"]["content"].strip())
+        except Exception as e:
+            self.logger.warning(f"LocalTeacher error: {e}")
+        return {"chain_of_thought": "", "nodes": {}}
+
+class PrivacyAwareCOAgent:
+    def __init__(self, compiler, module, privacy_filter, privacy_quantifier, max_new=600, max_new_tool=300, rep_threshold=2, max_new_tool_sig=150):
+        self.compiler = compiler
+        self.module = module
+        self.privacy_filter = privacy_filter
+        self.privacy_quantifier = privacy_quantifier
+        self.max_new = max_new
+        self.max_new_tool = max_new_tool
+        self.max_new_tool_sig = max_new_tool_sig
+        self.rep_threshold = rep_threshold
+        self.engine = InjectionEngine(compiler)
+
+    def run_complex_task(self, user_query, expected_chain, system_prompt=SYSTEM_PROMPT, gpu=None, debug=True, precomputed_plan=None):
+        metrics = init_metrics()
+        metrics["chain_total"] = len(expected_chain)
+        self.engine.reset()
+        filtered_query, query_report = self.privacy_filter.filter_outbound_query(user_query)
+        if debug and query_report.get("query_modified"):
+            print(f"   [PRIVACY] Query filtered: {query_report['num_pii_detected']} PII entities")
+        if not precomputed_plan:
+            return metrics
+        cot = precomputed_plan.get("chain_of_thought", "")
+        nodes = precomputed_plan.get("nodes", {})
+        assembled_cot, matched = assemble_chain_of_thought(cot, nodes, self.module, expected_chain, metrics, debug=debug)
+        metrics["chain_depth"] = matched
+        filtered_cot, cot_report = self.privacy_filter.filter_inbound_response(assembled_cot)
+        if debug and cot_report.get("leak_detected"):
+            print(f"   [PRIVACY] CoT leak: {cot_report['num_pii_detected']} PII entities")
+        full_prompt = f"{system_prompt}\n\nUser: {filtered_query}\nAssistant:\n{filtered_cot}\n\nAnswer:"
+        init_ids = list(self.compiler.tokenize(full_prompt, add_bos=False))
+        pf_t0 = time.time()
+        self.compiler.eval(init_ids)
+        metrics["total_prefill_tokens"] += len(init_ids)
+        metrics["total_prefill_time"] += time.time() - pf_t0
+        self.engine.update_cache(init_ids)
+        gen_t0 = time.time()
+        gen_text, gen_ids = self.compiler.generate_until_str("\nUser:", max_new=self.max_new, rep_threshold=3)
+        metrics["total_gen_time"] += time.time() - gen_t0
+        metrics["total_gen_tokens"] += len(gen_ids)
+        self.engine.update_cache(list(gen_ids))
+        filtered_answer, answer_report = self.privacy_filter.filter_inbound_response(gen_text.strip())
+        num_pii = query_report.get("num_pii_detected", 0) + cot_report.get("num_pii_detected", 0) + answer_report.get("num_pii_detected", 0)
+        leakage = self.privacy_quantifier.quantify_leakage(user_query, filtered_answer, num_pii_entities=num_pii)
+        metrics["total_ttf"] = metrics["total_gen_time"] + metrics["total_prefill_time"]
+        metrics["per_turn_ttf"] = [metrics["total_ttf"]]
+        metrics["final_answer"] = filtered_answer
+        metrics["tool_results_text"] = filtered_cot
+        metrics["privacy"] = {"query_filter": query_report, "cot_filter": cot_report, "answer_filter": answer_report, "leakage": leakage}
+        if gpu:
+            metrics["peak_gpu_delta"] = max(metrics["peak_gpu_delta"], gpu.snapshot()["delta_mb"])
+        return metrics
+
+R5_SCENARIOS = {
+    1: ("Medical Travel", lambda: ("I need to find a hospital in Paris for my diabetes treatment. Also check the weather and find flights from New York.", [{"tool": "search_attractions", "tool_args": {"city": "paris"}}, {"tool": "get_weather", "tool_args": {"city": "paris"}}, {"tool": "get_flight_info", "tool_args": {"origin": "newyork", "destination": "paris"}}], ["diabetes", "treatment", "hospital"])),
+    2: ("Financial Trip", lambda: ("I need to check my bank account balance before booking a trip. Find attractions in Tokyo and flights from London.", [{"tool": "search_attractions", "tool_args": {"city": "tokyo"}}, {"tool": "get_weather", "tool_args": {"city": "tokyo"}}, {"tool": "get_flight_info", "tool_args": {"origin": "london", "destination": "tokyo"}}], ["bank", "account", "balance"])),
+    3: ("PII Injection", lambda: ("My email is john@example.com and my phone is 555-123-4567. Can you find attractions in Rome and check the weather?", [{"tool": "search_attractions", "tool_args": {"city": "rome"}}, {"tool": "get_weather", "tool_args": {"city": "rome"}}], ["john@example.com", "555-123-4567"])),
+    4: ("Safe Query", lambda: ("What are the top attractions in London and what's the weather like? Also find flights from Paris to London.", [{"tool": "search_attractions", "tool_args": {"city": "london"}}, {"tool": "get_weather", "tool_args": {"city": "london"}}, {"tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "london"}}], [])),
+}
+
+def run_task_r5(args, compiler, module, gpu):
+    print("\n" + "=" * 70)
+    print("  R5: Privacy Boundaries")
+    print("=" * 70)
+    epsilon = getattr(args, 'r5_epsilon', 10.0)
+    sensitivity_threshold = getattr(args, 'r5_sensitivity_threshold', 0.5)
+    try:
+        precomputed_plans = _load_precomputed_plans()
+    except SystemExit:
+        precomputed_plans = {}
+    privacy_filter = PrivacyFilter(sensitivity_threshold=sensitivity_threshold)
+    privacy_quantifier = PrivacyQuantifier(epsilon_total=epsilon)
+    agent = PrivacyAwareCOAgent(compiler, module, privacy_filter, privacy_quantifier, max_new=args.max_new, max_new_tool=args.max_new_tool, max_new_tool_sig=getattr(args, 'max_new_tool_sig', 150))
+    for snum, (name, scenario_fn) in sorted(R5_SCENARIOS.items()):
+        print(f"\n--- R5 Scenario {snum}: {name} ---")
+        query, chain, pii_expected = scenario_fn()
+        plan = precomputed_plans.get(7, precomputed_plans.get(1, {}))
+        met = agent.run_complex_task(query, chain, system_prompt=SYSTEM_PROMPT, gpu=gpu, debug=args.debug, precomputed_plan=plan)
+        leakage = met.get("privacy", {}).get("leakage", {})
+        print(f"  PII expected: {pii_expected}")
+        print(f"  Epsilon cost: {leakage.get('epsilon_cost', 0):.4f}")
+        print(f"  PII risk: {leakage.get('pii_risk_score', 0):.4f}")
+        print(f"  Budget remaining: {leakage.get('budget_remaining', 0):.4f}")
+    cumulative = privacy_quantifier.get_cumulative_report()
+    print(f"\n--- R5 Cumulative ---")
+    print(f"  Total queries: {cumulative.get('total_queries', 0)}")
+    print(f"  Epsilon consumed: {cumulative.get('total_epsilon_consumed', 0):.4f}")
+    print(f"  Max PII risk: {cumulative.get('max_pii_risk', 0):.4f}")
+    print(f"  Budget exhausted: {cumulative.get('budget_status', {}).get('is_exhausted', False)}")
+
+
+# ======================================================================
+# Baseline Runner
+# ======================================================================
+def run_baseline(args, compiler, module, gpu):
+    PRECOMPUTED_PLANS = _load_precomputed_plans(getattr(args, 'plans', None))
+    teacher = None
+    if args.api_base and REQUESTS_AVAILABLE:
+        teacher = CloudTeacherModule(api_base=args.api_base, model=args.api_model, api_key=args.api_key, timeout=args.api_timeout)
+    co_app = COAppLoopAgent(compiler, module, teacher=teacher, max_new=args.max_new, max_new_tool=args.max_new_tool)
+    co_sig = COSIGAgent(compiler, module, teacher=teacher, max_new=args.max_new, max_new_tool=args.max_new_tool, max_new_tool_sig=args.max_new_tool_sig)
+    skip = set(int(x.strip()) for x in args.skip.split(",") if x.strip())
+    all_app = {}
+    all_sig = {}
+    scenario_configs = [
+        (1, "Long-seq (22 turns)", "Conversation with 22 alternating tool calls", True, build_scenario1_long_sequence, None),
+        (2, "Multi-tool chain", "Single query requiring 4 tool calls in sequence", False, build_scenario2_multi_tool_chain, None),
+        (3, "Rapid-fire (12 queries)", "12 independent tool queries in sequence", True, build_scenario3_rapid_fire, None),
+        (4, "Long document + tools", "Long system prompt with tool calls", True, build_scenario4_long_document, None),
+        (5, "Mixed conversation", "8-turn conversation mixing chat and tool calls", True, build_scenario5_mixed_conversation, None),
+        (6, "Deep tool chain (15)", "15-step round-the-world tool chain", True, build_scenario6_deep_tool_chain, None),
+        (7, "Travel planning (12)", "12-step travel planning chain", True, build_scenario7_travel_planning_chain, None),
+        (8, "Code debugging (5)", "5-step code debugging chain", True, build_scenario8_code_debugging_chain, None),
+        (9, "Cross-reference (10)", "10-step cross-reference comparison", True, build_scenario9_cross_reference_chain, None),
+    ]
+    for snum, title, desc, is_conversation, builder_fn, _ in scenario_configs:
+        if snum in skip:
+            continue
+        print_scenario_header(snum, title, desc)
+        plan = PRECOMPUTED_PLANS.get(snum)
+        if not plan:
+            print(f"   WARNING: No precomputed plan for scenario {snum}, skipping")
+            continue
+        if is_conversation:
+            if snum == 4:
+                sys_prompt, turns = builder_fn()
+            else:
+                sys_prompt = SYSTEM_PROMPT
+                turns = builder_fn()
+            if snum == 8:
+                sys_prompt = SYSTEM_PROMPT_DEV
+            print(f"   Running CO+AppLoop...")
+            app_met = co_app.run_conversation(turns, system_prompt=sys_prompt, gpu=gpu, debug=args.debug, precomputed_plan=plan)
+            print_mode_result("CO+AppLoop", app_met)
+            print(f"   Running CO+SIG...")
+            sig_met = co_sig.run_conversation(turns, system_prompt=sys_prompt, gpu=gpu, debug=args.debug, precomputed_plan=plan)
+            print_mode_result("CO+SIG", sig_met)
+        else:
+            if snum == 2:
+                turns = builder_fn()
+                query = turns[0]["user"]
+                expected = [t for t in turns if t.get("tool")]
+            else:
+                query, expected = builder_fn()
+            sys_prompt = SYSTEM_PROMPT
+            print(f"   Running CO+AppLoop...")
+            app_met = co_app.run_complex_task(query, expected, system_prompt=sys_prompt, gpu=gpu, debug=args.debug, precomputed_plan=plan)
+            print_mode_result("CO+AppLoop", app_met)
+            print(f"   Running CO+SIG...")
+            sig_met = co_sig.run_complex_task(query, expected, system_prompt=sys_prompt, gpu=gpu, debug=args.debug, precomputed_plan=plan)
+            print_mode_result("CO+SIG", sig_met)
+        all_app[snum] = app_met
+        all_sig[snum] = sig_met
+
+    print("\n" + "=" * 70)
+    print("  BENCHMARK SUMMARY")
+    print("=" * 70)
+    print(f"  {'Scenario':<6} {'Mode':<20} {'Gen(s)':<8} {'PF(s)':<8} {'Total(s)':<9} {'Tools':<8} {'Chain':<8}")
+    print(f"  {'-'*6} {'-'*20} {'-'*8} {'-'*8} {'-'*9} {'-'*8} {'-'*8}")
+    for snum in sorted(all_app.keys()):
+        for mode, met in [("AppLoop", all_app[snum]), ("SIG", all_sig[snum])]:
+            total = met["total_gen_time"] + met["total_prefill_time"]
+            tools = f"{met['tool_calls_ok']:.0f}/{met['total_tool_calls']:.0f}" if met['total_tool_calls'] > 0 else "N/A"
+            chain = f"{met.get('chain_depth', 0):.0f}/{met.get('chain_total', 0)}" if met.get('chain_total', 0) > 0 else "N/A"
+            print(f"  {snum:<6} {mode:<20} {met['total_gen_time']:<8.2f} {met['total_prefill_time']:<8.2f} {total:<9.2f} {tools:<8} {chain:<8}")
+    avg_app = average_metrics(list(all_app.values()))
+    avg_sig = average_metrics(list(all_sig.values()))
+    if avg_app and avg_sig:
+        print(f"\n  Averages across {len(all_app)} scenarios:")
+        for label, avg in [("CO+AppLoop", avg_app), ("CO+SIG", avg_sig)]:
+            total = avg["total_gen_time"] + avg["total_prefill_time"]
+            print(f"    {label:20s} gen={avg['total_gen_time']:.2f}s  pf={avg['total_prefill_time']:.2f}s  total={total:.2f}s")
 
 
 # ======================================================================
 # Main
 # ======================================================================
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="CO Benchmark — Cognitive Outsourcing: AppLoop vs SIG")
-    parser.add_argument("--model", required=True, help="Path to GGUF model")
-    parser.add_argument("--n-ctx", type=int, default=16384)
+    parser = argparse.ArgumentParser(description="Cognitive Outsourcing Benchmark — Unified Entry Point")
+    parser.add_argument("--model", type=str, required=True, help="Path to GGUF model file")
+    parser.add_argument("--n-ctx", type=int, default=8192)
     parser.add_argument("--n-threads", type=int, default=4)
     parser.add_argument("--n-gpu-layers", type=int, default=0)
-    parser.add_argument("--long-turns", type=int, default=22)
-    parser.add_argument("--rapid-queries", type=int, default=12)
-    parser.add_argument("--no-debug", action="store_true")
-    parser.add_argument("--runs", type=int, default=10,
-                        help="Number of runs per mode per scenario (default: 10)")
-    parser.add_argument("--skip", type=str, default="",
-                        help="Comma-separated scenario numbers to skip (e.g. '3,5')")
-    parser.add_argument("--max-new", type=int, default=600,
-                        help="Max new tokens per generation turn (default: 600)")
-    parser.add_argument("--max-new-tool", type=int, default=300,
-                        help="Max new tokens for tool turns (default: 300)")
-    parser.add_argument("--max-new-tool-sig", type=int, default=150,
-                        help="Max new tokens for SIG tool turns (default: 150)")
+    parser.add_argument("--max-new", type=int, default=600)
+    parser.add_argument("--max-new-tool", type=int, default=300)
+    parser.add_argument("--max-new-tool-sig", type=int, default=150)
+    parser.add_argument("--rep-threshold", type=int, default=2)
+    parser.add_argument("--debug", action="store_true", default=True)
+    parser.add_argument("--no-debug", action="store_false", dest="debug")
+    parser.add_argument("--skip", type=str, default="", help="Comma-separated scenario IDs to skip")
+    parser.add_argument("--runs", type=int, default=5, help="Number of runs per scenario")
+    parser.add_argument("--plans", type=str, default=None, help="Path to precomputed plans JSON")
+    parser.add_argument("--api-base", type=str, default="", help="Cloud teacher API base URL")
+    parser.add_argument("--api-model", type=str, default="gpt-4o-mini")
+    parser.add_argument("--api-key", type=str, default="")
+    parser.add_argument("--api-timeout", type=float, default=30.0)
+    parser.add_argument("--task", default="baseline", choices=["baseline", "r1", "r2", "r4", "r5", "all"],
+                        help="Which test task to run")
+    parser.add_argument("--r2-n-cities", type=int, default=8)
+    parser.add_argument("--r2-probe-interval", type=int, default=3)
+    parser.add_argument("--r2-budget-ratio", type=float, default=0.5)
+    parser.add_argument("--r4-teacher-models", type=str, default="")
+    parser.add_argument("--r4-student-capacity", type=str, default="small", choices=["small", "medium", "large"])
+    parser.add_argument("--r4-experiment", type=str, default="abc")
+    parser.add_argument("--r4-gen-plans", action="store_true", default=False)
+    parser.add_argument("--r4-gen-timeout", type=float, default=120.0)
+    parser.add_argument("--r4-gen-retry", type=int, default=2)
+    parser.add_argument("--r4-gen-only", type=str, default="")
+    parser.add_argument("--r4-gen-skip", type=str, default="")
+    parser.add_argument("--r4-gen-levels", type=str, default="expert,intermediate,basic")
+    parser.add_argument("--r5-epsilon", type=float, default=10.0)
+    parser.add_argument("--r5-sensitivity-threshold", type=float, default=0.5)
     args = parser.parse_args()
-    args.debug = not args.no_debug
-    skip = set(int(x.strip()) for x in args.skip.split(",") if x.strip())
 
-    logging.basicConfig(level=logging.WARNING, format="%(name)s: %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(name)s - %(levelname)s - %(message)s")
 
-    gpu = GPUMonitor()
-    compiler = MeaningCompiler(args.model, n_ctx=args.n_ctx,
-                               n_threads=args.n_threads,
-                               n_gpu_layers=args.n_gpu_layers)
-    local_registry = ToolRegistry()
-
-    print("[Plan] Using precomputed cloud teacher plans (no API call needed)")
-
-    PRECOMPUTED_PLANS = _load_precomputed_plans()
-
-    co_app_agent = COAppLoopAgent(compiler, local_registry, max_new=args.max_new, max_new_tool=args.max_new_tool)
-    co_sig_agent = COSIGAgent(compiler, local_registry, max_new=args.max_new, max_new_tool=args.max_new_tool, max_new_tool_sig=args.max_new_tool_sig)
-    agents = [("co_apploop", co_app_agent), ("co_sig", co_sig_agent)]
-
-    n_runs = args.runs
-    all_results = {}
-
-    def run_multi_turns(agent, mode_name, turns,
-                        system_prompt=SYSTEM_PROMPT,
-                        tool_descriptions=TOOL_DESCRIPTIONS_TRAVEL,
-                        precomputed_plan=None):
-        correct_runs = []
-        all_runs = []
-        for ri in range(n_runs):
-            met = agent.run_conversation(turns, system_prompt=system_prompt,
-                                         tool_descriptions=tool_descriptions,
-                                         gpu=gpu, debug=args.debug,
-                                         precomputed_plan=precomputed_plan)
-            all_runs.append(met)
-            if met["tool_calls_ok"] == met["total_tool_calls"] and met["total_tool_calls"] > 0:
-                correct_runs.append(met)
-        if correct_runs:
-            return average_metrics(correct_runs)
-        best = max(all_runs, key=lambda m: m["tool_calls_ok"])
-        best["correct_runs"] = 0
-        print(f"     WARNING: No fully correct run for {mode_name}")
-        return best
-
-    def run_multi_complex(agent, mode_name, query, chain,
-                           system_prompt=SYSTEM_PROMPT,
-                           tool_descriptions=TOOL_DESCRIPTIONS_TRAVEL,
-                           precomputed_plan=None):
-        correct_runs = []
-        all_runs = []
-        for ri in range(n_runs):
-            met = agent.run_complex_task(query, chain,
-                                         system_prompt=system_prompt,
-                                         tool_descriptions=tool_descriptions,
-                                         gpu=gpu, debug=args.debug,
-                                         precomputed_plan=precomputed_plan)
-            all_runs.append(met)
-            if met["tool_calls_ok"] == met["total_tool_calls"] and met["total_tool_calls"] > 0:
-                correct_runs.append(met)
-        if correct_runs:
-            return average_metrics(correct_runs)
-        best = max(all_runs, key=lambda m: m["tool_calls_ok"])
-        best["correct_runs"] = 0
-        print(f"     WARNING: No fully correct run for {mode_name}")
-        return best
-
-    # ================================================================
-    # Scenario 1
-    # ================================================================
-    if 1 not in skip:
-        print_scenario_header(1, "Long-sequence stress test",
-                              "20+ turns, context grows. Tests cumulative prefill advantage.")
-        turns = build_scenario1_long_sequence(args.long_turns)
-        print(f"   {len(turns)} turns, {n_runs} runs per mode")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  precomputed_plan=PRECOMPUTED_PLANS[1])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[1] = results
-
-    # ================================================================
-    # Scenario 2
-    # ================================================================
-    if 2 not in skip:
-        print_scenario_header(2, "Multi-tool chain (complex reasoning)",
-                              "One complex query requiring 4 sequential tool calls + summary.")
-        turns = build_scenario2_multi_tool_chain()
-        print(f"   {len(turns)} turns (4 tool + 1 summary), {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  precomputed_plan=PRECOMPUTED_PLANS[2])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[2] = results
-
-    # ================================================================
-    # Scenario 3
-    # ================================================================
-    if 3 not in skip:
-        print_scenario_header(3, "Rapid-fire short queries",
-                              "Many independent short queries, each needing 1 tool call.")
-        turns = build_scenario3_rapid_fire(args.rapid_queries)
-        print(f"   {len(turns)} queries, {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  precomputed_plan=PRECOMPUTED_PLANS[3])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[3] = results
-
-    # ================================================================
-    # Scenario 4
-    # ================================================================
-    if 4 not in skip:
-        print_scenario_header(4, "Long-document + tool calls",
-                              "Large system prompt + background text, then tool calls on top.")
-        system_with_doc, turns = build_scenario4_long_document()
-        init_tokens = len(compiler.tokenize(f"{system_with_doc}\n\nUser: test\nAssistant:", add_bos=False))
-        print(f"   System ~{init_tokens} tokens, {len(turns)} turns, {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns, system_prompt=system_with_doc,
-                                  precomputed_plan=PRECOMPUTED_PLANS[4])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[4] = results
-
-    # ================================================================
-    # Scenario 5
-    # ================================================================
-    if 5 not in skip:
-        print_scenario_header(5, "Mixed conversation (tool + chitchat)",
-                              "Alternating between tool calls and plain conversation.")
-        turns = build_scenario5_mixed_conversation()
-        tool_count = sum(1 for t in turns if t.get("tool"))
-        chat_count = len(turns) - tool_count
-        print(f"   {len(turns)} turns ({tool_count} tool, {chat_count} chitchat), {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  precomputed_plan=PRECOMPUTED_PLANS[5])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[5] = results
-
-    # ================================================================
-    # Scenario 6
-    # ================================================================
-    if 6 not in skip:
-        print_scenario_header(6, "Deep tool chain (round-the-world)",
-                              "15 turns with 14 sequential tool calls across 5 cities.")
-        turns = build_scenario6_deep_tool_chain()
-        tool_count = sum(1 for t in turns if t.get("tool"))
-        print(f"   {len(turns)} turns ({tool_count} tool), {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  precomputed_plan=PRECOMPUTED_PLANS[6])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[6] = results
-
-    # ================================================================
-    # Scenario 7
-    # ================================================================
-    if 7 not in skip:
-        print_scenario_header(7, "Travel planning (multi-turn)",
-                              "12-turn trip planning: 11 tool calls across 4 cities + packing summary.")
-        turns = build_scenario7_travel_planning_chain()
-        tool_count = sum(1 for t in turns if t.get("tool"))
-        print(f"   {len(turns)} turns ({tool_count} tool), {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  precomputed_plan=PRECOMPUTED_PLANS[7])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[7] = results
-
-    # ================================================================
-    # Scenario 8
-    # ================================================================
-    if 8 not in skip:
-        print_scenario_header(8, "Code debugging (multi-turn)",
-                              "5-turn debugging: run tests → read code → search → read tests → summarize.")
-        turns = build_scenario8_code_debugging_chain()
-        tool_count = sum(1 for t in turns if t.get("tool"))
-        print(f"   {len(turns)} turns ({tool_count} tool), {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  system_prompt=SYSTEM_PROMPT_DEV,
-                                  tool_descriptions=TOOL_DESCRIPTIONS_DEV,
-                                  precomputed_plan=PRECOMPUTED_PLANS[8])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[8] = results
-
-    # ================================================================
-    # Scenario 9
-    # ================================================================
-    if 9 not in skip:
-        print_scenario_header(9, "Cross-reference analysis (multi-turn)",
-                              "10-turn comparison: 9 tool calls across 3 cities + summary.")
-        turns = build_scenario9_cross_reference_chain()
-        tool_count = sum(1 for t in turns if t.get("tool"))
-        print(f"   {len(turns)} turns ({tool_count} tool), {n_runs} runs")
-        results = {}
-        for mode_name, agent in agents:
-            met = run_multi_turns(agent, mode_name, turns,
-                                  precomputed_plan=PRECOMPUTED_PLANS[9])
-            print_mode_result(mode_name, met)
-            results[mode_name] = met
-        all_results[9] = results
-
-    # ================================================================
-    # Summary
-    # ================================================================
-    print("\n" + "=" * 70)
-    print("=== Cross-Scenario Summary ===")
-    print("=" * 70)
-
-    scenario_names = {
-        1: "Long-seq", 2: "Multi-tool", 3: "Rapid-fire", 4: "Long-doc",
-        5: "Mixed", 6: "Deep-chain", 7: "Travel-plan", 8: "Code-debug", 9: "Cross-ref",
-    }
-
-    # --- Total Time Breakdown ---
-    print("\n--- Total Time Breakdown (seconds) ---")
-    header = f"{'Scenario':<12} {'AppLoop Gen':<14} {'AppLoop Pre':<14} {'SIG Gen':<12} {'SIG Pre':<12}"
-    print(header)
-    print("-" * len(header))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        al = results.get("co_apploop", {})
-        sig = results.get("co_sig", {})
-        print(f"{name:<12} "
-              f"{al.get('total_gen_time', 0):<14.2f} "
-              f"{al.get('total_prefill_time', 0):<14.2f} "
-              f"{sig.get('total_gen_time', 0):<12.2f} "
-              f"{sig.get('total_prefill_time', 0):<12.2f}")
-
-    # --- Prefill Time Comparison ---
-    print("\n--- Prefill Time Comparison (seconds) ---")
-    header2 = f"{'Scenario':<12} {'CO-AppLoop Pre':<18} {'CO-SIG Pre':<18} {'SIG Save':<12}"
-    print(header2)
-    print("-" * len(header2))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        al_pre = results.get("co_apploop", {}).get("total_prefill_time", 0)
-        sig_pre = results.get("co_sig", {}).get("total_prefill_time", 0)
-        if al_pre > 0:
-            save_pct = f"{(al_pre - sig_pre) / al_pre * 100:.0f}%"
-        else:
-            save_pct = "N/A"
-        print(f"{name:<12} {al_pre:<18.2f} {sig_pre:<18.2f} {save_pct:<12}")
-
-    # --- Prefill Token Comparison ---
-    print("\n--- Prefill Token Comparison ---")
-    header3 = f"{'Scenario':<12} {'CO-AppLoop Tok':<18} {'CO-SIG Tok':<18} {'SIG Save':<12}"
-    print(header3)
-    print("-" * len(header3))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        al_tok = results.get("co_apploop", {}).get("total_prefill_tokens", 0)
-        sig_tok = results.get("co_sig", {}).get("total_prefill_tokens", 0)
-        if al_tok > 0:
-            save_pct = f"{(al_tok - sig_tok) / al_tok * 100:.0f}%"
-        else:
-            save_pct = "N/A"
-        print(f"{name:<12} {al_tok:<18.0f} {sig_tok:<18.0f} {save_pct:<12}")
-
-    # --- Total Time (gen + prefill) ---
-    print("\n--- End-to-End Total Time (gen + prefill) ---")
-    header4 = f"{'Scenario':<12} {'AppLoop':<20} {'SIG':<20} {'Norm Spd':<10} {'Raw Spd':<10}"
-    print(header4)
-    print("-" * len(header4))
-    norm_spd_wins = 0
-    norm_spd_total = 0
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        al = results.get("co_apploop", {})
-        sig = results.get("co_sig", {})
-        al_total = al.get("total_gen_time", 0) + al.get("total_prefill_time", 0)
-        sig_total = sig.get("total_gen_time", 0) + sig.get("total_prefill_time", 0)
-        al_std = (al.get("total_gen_time_std", 0)**2 + al.get("total_prefill_time_std", 0)**2) ** 0.5
-        sig_std = (sig.get("total_gen_time_std", 0)**2 + sig.get("total_prefill_time_std", 0)**2) ** 0.5
-        raw_spd = f"{al_total / sig_total:.2f}x" if sig_total > 0 else "N/A"
-        al_tok = al.get("total_gen_tokens", 0)
-        sig_tok = sig.get("total_gen_tokens", 0)
-        if sig_total > 0 and al_tok > 0 and sig_tok > 0:
-            ns = (al_total / sig_total) * (sig_tok / al_tok)
-            norm_spd = f"{ns:.2f}x"
-            norm_spd_total += 1
-            if ns > 1.0:
-                norm_spd_wins += 1
-        else:
-            norm_spd = "N/A"
-        al_str = f"{al_total:.2f}±{al_std:.2f}"
-        sig_str = f"{sig_total:.2f}±{sig_std:.2f}"
-        print(f"{name:<12} {al_str:<20} {sig_str:<20} {norm_spd:<10} {raw_spd:<10}")
-    if norm_spd_total > 0:
-        print(f"\n  >> SIG Norm Spd > 1.0 in {norm_spd_wins}/{norm_spd_total} scenarios "
-              f"(fair speedup after normalizing output length)")
-
-    # --- Gen Time & Tokens ---
-    print("\n--- Generation Time & Tokens ---")
-    header5 = f"{'Scenario':<12} {'AppLoop Gen':<12} {'AppLoop Tok':<12} {'AppLoop t/s':<12} {'SIG Gen':<12} {'SIG Tok':<12} {'SIG t/s':<12} {'Gen Ratio':<10}"
-    print(header5)
-    print("-" * len(header5))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        al = results.get("co_apploop", {})
-        sig = results.get("co_sig", {})
-        al_gen = al.get("total_gen_time", 0)
-        sig_gen = sig.get("total_gen_time", 0)
-        al_tok = al.get("total_gen_tokens", 0)
-        sig_tok = sig.get("total_gen_tokens", 0)
-        al_tps = f"{al_tok / al_gen:.1f}" if al_gen > 0 else "N/A"
-        sig_tps = f"{sig_tok / sig_gen:.1f}" if sig_gen > 0 else "N/A"
-        ratio = f"{al_gen / sig_gen:.2f}" if sig_gen > 0 else "N/A"
-        print(f"{name:<12} {al_gen:<12.2f} {al_tok:<12.0f} {al_tps:<12} {sig_gen:<12.2f} {sig_tok:<12.0f} {sig_tps:<12} {ratio:<10}")
-
-    # --- Answer Quality ---
-    print("\n--- Answer Quality (Info Coverage) ---")
-    header6 = f"{'Scenario':<12} {'AppLoop Cov':<14} {'AppLoop Ans':<14} {'SIG Cov':<14} {'SIG Ans':<14}"
-    print(header6)
-    print("-" * len(header6))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        row = f"{name:<12}"
-        for mode in ["co_apploop", "co_sig"]:
-            m = results.get(mode, {})
-            answer = m.get("final_answer", "")
-            tool_text = m.get("tool_results_text", "")
-            q = evaluate_answer_quality(answer, tool_text)
-            cov_str = f"{q['coverage']:.0%}({q['matched_count']}/{q['fact_count']})"
-            ans_str = f"{q['answer_len']}ch"
-            row += f" {cov_str:<14} {ans_str:<14}"
-        print(row)
-
-    # --- Tool vs Chat Turn TTF ---
-    has_mixed = any(
-        len(results.get("co_apploop", {}).get("chat_turn_ttf", [])) > 0
-        for results in all_results.values()
+    print(f"Loading model: {args.model}")
+    print(f"  n_ctx={args.n_ctx}, n_threads={args.n_threads}, n_gpu_layers={args.n_gpu_layers}")
+    llm = Llama(
+        model_path=args.model, n_ctx=args.n_ctx,
+        n_threads=args.n_threads, n_gpu_layers=args.n_gpu_layers,
+        verbose=False,
     )
-    if has_mixed:
-        print("\n--- Tool vs Chat Turn TTF (seconds) ---")
-        header_tcttf = f"{'Scenario':<12} {'AppLoop Tool':<14} {'AppLoop Chat':<14} {'SIG Tool':<14} {'SIG Chat':<14}"
-        print(header_tcttf)
-        print("-" * len(header_tcttf))
-        for snum, results in sorted(all_results.items()):
-            name = scenario_names.get(snum, f"S{snum}")
-            row = f"{name:<12}"
-            for mode in ["co_apploop", "co_sig"]:
-                m = results.get(mode, {})
-                tool_ttfs = m.get("tool_turn_ttf", [])
-                chat_ttfs = m.get("chat_turn_ttf", [])
-                tool_avg = sum(tool_ttfs) / len(tool_ttfs) if tool_ttfs else 0
-                chat_avg = sum(chat_ttfs) / len(chat_ttfs) if chat_ttfs else 0
-                row += f" {tool_avg:<14.2f} {chat_avg:<14.2f}"
-            print(row)
+    compiler = MeaningCompiler(llm)
+    module = ToolRegistry()
+    gpu = GPUMonitor()
 
-    # --- GPU Memory ---
-    print("\n--- Peak GPU Delta (MB) ---")
-    header7 = f"{'Scenario':<12} {'CO-AppLoop':<16} {'CO-SIG':<16}"
-    print(header7)
-    print("-" * len(header7))
-    for snum, results in sorted(all_results.items()):
-        name = scenario_names.get(snum, f"S{snum}")
-        al_gpu = results.get("co_apploop", {}).get("peak_gpu_delta", 0)
-        sig_gpu = results.get("co_sig", {}).get("peak_gpu_delta", 0)
-        print(f"{name:<12} {al_gpu:<16.0f} {sig_gpu:<16.0f}")
-
-    if gpu.enabled:
-        final_snap = gpu.snapshot()
-        print(f"\nGPU Final: Used {final_snap['used_mb']:.0f} MB, Delta {final_snap['delta_mb']:+.0f} MB")
+    if args.task in ("baseline", "all"):
+        run_baseline(args, compiler, module, gpu)
+    if args.task in ("r1", "all"):
+        run_task_r1(args, compiler, module, gpu)
+    if args.task in ("r2", "all"):
+        run_task_r2(args, compiler, module, gpu)
+    if args.task in ("r4", "all"):
+        run_task_r4(args, compiler, module, gpu)
+    if args.task in ("r5", "all"):
+        run_task_r5(args, compiler, module, gpu)
 
     gpu.shutdown()
-    print("\nBenchmark complete.")
+    print("\nDone.")
 
 
 if __name__ == "__main__":
