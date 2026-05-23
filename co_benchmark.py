@@ -8,6 +8,15 @@ Tasks:
   r2       : KV cache degradation analysis
   r4       : Teacher-student distillation
   r5       : Privacy boundaries
+  r6       : Dynamic re-planning (pure simulation)
+  r7       : Multimodal SIG (pure simulation, needs numpy)
+  r8       : Spatial cognition & sustained attention (pure simulation)
+  r9       : Real-time constrained SIG (pure simulation)
+  r10      : Injection attacks & defense (pure simulation)
+  r11      : Factuality & hallucination (pure simulation)
+  r12      : SIG scaling law (analytical model)
+  r13      : Distributed cognitive outsourcing (pure simulation)
+  r14      : SIG & emerging reasoning paradigms (pure simulation)
   all      : run all tasks sequentially
 
 Requires: pip install -r requirements.txt
@@ -1948,7 +1957,10 @@ def main():
     parser.add_argument("--api-model", type=str, default="gpt-4o-mini")
     parser.add_argument("--api-key", type=str, default="")
     parser.add_argument("--api-timeout", type=float, default=30.0)
-    parser.add_argument("--task", default="baseline", choices=["baseline", "r1", "r2", "r3", "r4", "r5", "all"],
+    parser.add_argument("--task", default="baseline",
+                        choices=["baseline", "r1", "r2", "r3", "r4", "r5",
+                                 "r6", "r7", "r8", "r9", "r10", "r11",
+                                 "r12", "r13", "r14", "all"],
                         help="Which test task to run")
     parser.add_argument("--r2-n-cities", type=int, default=8)
     parser.add_argument("--r2-probe-interval", type=int, default=3)
@@ -1964,6 +1976,16 @@ def main():
     parser.add_argument("--r4-gen-levels", type=str, default="expert,intermediate,basic")
     parser.add_argument("--r5-epsilon", type=float, default=10.0)
     parser.add_argument("--r5-sensitivity-threshold", type=float, default=0.5)
+    parser.add_argument("--r6-failure-rate", type=float, default=0.15,
+                        help="R6: base tool failure rate for simulation")
+    parser.add_argument("--r7-kv-dim", type=int, default=4096,
+                        help="R7: KV cache dimension for multimodal simulation")
+    parser.add_argument("--r9-latency-budget", type=float, default=2.0,
+                        help="R9: total latency budget in seconds")
+    parser.add_argument("--r10-anomaly-threshold", type=float, default=0.10,
+                        help="R10: attention anomaly detection threshold")
+    parser.add_argument("--r13-num-devices", type=int, default=4,
+                        help="R13: number of devices for distributed simulation")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(name)s - %(levelname)s - %(message)s")
@@ -2004,6 +2026,78 @@ def main():
             import transformer_bench
             from transformer_bench import run_r3_empirical, print_r3_empirical
             print_r3_empirical(run_r3_empirical())
+
+    if args.task in ("r6", "all"):
+        try:
+            from r6_dynamic_replanning import run_task_r6
+        except ImportError:
+            import r6_dynamic_replanning
+            run_task_r6 = r6_dynamic_replanning.run_task_r6
+        run_task_r6(args)
+
+    if args.task in ("r7", "all"):
+        try:
+            from r7_multimodal_sig import run_task_r7
+        except ImportError:
+            import r7_multimodal_sig
+            run_task_r7 = r7_multimodal_sig.run_task_r7
+        run_task_r7(args)
+
+    if args.task in ("r8", "all"):
+        try:
+            from r8_spatial_cognition import run_task_r8
+        except ImportError:
+            import r8_spatial_cognition
+            run_task_r8 = r8_spatial_cognition.run_task_r8
+        run_task_r8(args)
+
+    if args.task in ("r9", "all"):
+        try:
+            from r9_realtime_sig import run_task_r9
+        except ImportError:
+            import r9_realtime_sig
+            run_task_r9 = r9_realtime_sig.run_task_r9
+        run_task_r9(args)
+
+    if args.task in ("r10", "all"):
+        try:
+            from r10_injection_attacks import run_task_r10
+        except ImportError:
+            import r10_injection_attacks
+            run_task_r10 = r10_injection_attacks.run_task_r10
+        run_task_r10(args)
+
+    if args.task in ("r11", "all"):
+        try:
+            from r11_factuality import run_task_r11
+        except ImportError:
+            import r11_factuality
+            run_task_r11 = r11_factuality.run_task_r11
+        run_task_r11(args)
+
+    if args.task in ("r12", "all"):
+        try:
+            from r12_scaling_law import run_task_r12
+        except ImportError:
+            import r12_scaling_law
+            run_task_r12 = r12_scaling_law.run_task_r12
+        run_task_r12(args)
+
+    if args.task in ("r13", "all"):
+        try:
+            from r13_distributed_co import run_task_r13
+        except ImportError:
+            import r13_distributed_co
+            run_task_r13 = r13_distributed_co.run_task_r13
+        run_task_r13(args)
+
+    if args.task in ("r14", "all"):
+        try:
+            from r14_reasoning_paradigms import run_task_r14
+        except ImportError:
+            import r14_reasoning_paradigms
+            run_task_r14 = r14_reasoning_paradigms.run_task_r14
+        run_task_r14(args)
 
     gpu.shutdown()
     print("\nDone.")
