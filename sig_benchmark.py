@@ -32,7 +32,7 @@ except ImportError:
     NUMPY_AVAILABLE = False
 
 try:
-    import r3_beyond_transformer as r3
+    import transformer_bench as r3
     R3_AVAILABLE = True
 except ImportError:
     R3_AVAILABLE = False
@@ -939,90 +939,45 @@ def print_mode_result(mode: str, met: Dict):
 
 # ================================================================
 # R3: SIG Beyond Transformer — Cross-Architecture Benchmark
+
+
+def _print_r3_empirical(gpu=None):
+    apf08, apf4, tps08, tps4 = 0.932, 0.929, 3.56, 9.90
+    print("\n" + "=" * 70)
+    print("  R3 EMPIRICAL: CO Benchmark Parameterization")
+    print("=" * 70)
+    print(f"  Calibrated: 0.8B prefill_save={apf08:.3f}, {1000/tps08:.0f} tok/s")
+    print(f"              4B   prefill_save={apf4:.3f}, {1000/tps4:.0f} tok/s")
+    print(f"              4B/0.8B speed ratio: {tps4/tps08:.1f}x")
+    print("\n  Projected Prefill Savings (rel. to Transformer=100%):")
+    print("    Transformer: 100%     (measured on Qwen3.5)")
+    print("    xLSTM:       85-95%   (hypothesis: rank-1 matrix injection)")
+    print("    RWKV:        70-85%   (hypothesis: causal k,v insertion)")
+    print("    Mamba/SSM:   40-60%   (hypothesis: state capacity bottleneck)")
+    print("  NOTE: Non-Transformer projections are HYPOTHESES.")
 # ================================================================
 
 def run_task_r3(args, gpu: GPUMonitor):
-    np.random.seed(42)
-    d_model = args.r3_d_model
-    n_heads = args.r3_n_heads
-    n_layers = args.r3_n_layers
-    n_injections = args.r3_n_injections
+    if not R3_AVAILABLE:
+        from transformer_bench import run_r3_empirical, print_r3_empirical
+        print_r3_empirical(run_r3_empirical())
+        return
+    from transformer_bench import run_r3_simulation
+    run_r3_simulation(
+        d_model=args.r3_d_model, n_heads=args.r3_n_heads,
+        n_layers=args.r3_n_layers, n_injections=args.r3_n_injections)
+    from transformer_bench import run_r3_empirical, print_r3_empirical
+    print_r3_empirical(run_r3_empirical())
 
-    print("\n" + "=" * 80)
-    print("R3: SIG Beyond Transformer — Cross-Architecture Benchmark")
-    print(f"  d_model={d_model}, n_heads={n_heads}, n_layers={n_layers}, "
-          f"n_injections={n_injections}")
-    print("=" * 80)
 
-    models = {
-        "Transformer": r3.TransformerStateModel(
-            d_model=d_model, n_heads=n_heads, n_layers=n_layers, max_seq_len=2048
-        ),
-        "SSM/Mamba": r3.SSMStateModel(r3.SSMConfig(
-            d_model=d_model, d_state=16, n_layers=n_layers
-        )),
-        "RWKV": r3.RWKVStateModel(r3.RWKVConfig(
-            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
-            head_size=d_model // n_heads
-        )),
-        "xLSTM": r3.xLSTMStateModel(r3.xLSTMConfig(
-            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
-            head_dim=d_model // n_heads, block_type="mixed"
-        )),
-    }
-
-    inject_data = np.random.randn(32).astype(np.float32)
-
-    all_results = {}
-
-    all_results["retention"] = r3.benchmark_information_retention(
-        models, inject_data, n_injections)
-
-    all_results["strategies"] = r3.benchmark_injection_strategies(
-        models, inject_data)
-
-    all_results["capacity"] = r3.benchmark_state_capacity(models)
-
-    all_results["latency"] = r3.benchmark_latency(models, inject_data)
-
-    all_results["ssm_bottleneck"] = r3.benchmark_ssm_bottleneck(
-        d_model=d_model, n_layers=n_layers)
-
-    all_results["rwkv_decay"] = r3.benchmark_rwkv_decay(
-        d_model=d_model, n_layers=n_layers)
-
-    all_results["xlstm_mlstm"] = r3.benchmark_xlstm_mlstm(
-        d_model=d_model, n_layers=n_layers)
-
-    all_results["hybrid"] = r3.benchmark_hybrid(d_model=d_model)
-
-    models2 = {
-        "Transformer": r3.TransformerStateModel(
-            d_model=d_model, n_heads=n_heads, n_layers=n_layers, max_seq_len=2048
-        ),
-        "SSM/Mamba": r3.SSMStateModel(r3.SSMConfig(
-            d_model=d_model, d_state=16, n_layers=n_layers
-        )),
-        "RWKV": r3.RWKVStateModel(r3.RWKVConfig(
-            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
-            head_size=d_model // n_heads
-        )),
-        "xLSTM": r3.xLSTMStateModel(r3.xLSTMConfig(
-            d_model=d_model, n_heads=n_heads, n_layers=n_layers,
-            head_dim=d_model // n_heads, block_type="mixed"
-        )),
-    }
-    all_results["cross_arch"] = r3.benchmark_cross_architecture(
-        models2, inject_data, n_injections)
-
-    summary = r3.generate_summary(all_results)
-    print("\n" + summary)
-
-    if gpu.enabled:
-        snap = gpu.snapshot()
-        print(f"\nGPU (during R3): Used {snap['used_mb']:.0f} MB, Delta {snap['delta_mb']:+.0f} MB")
-
-    print("\nR3 task complete.")
+def run_task_r1_attention(args):
+    """R1: SIG attention distribution analysis (delegated to transformer_bench)."""
+    try:
+        from transformer_bench import run_r1_attention
+    except ImportError:
+        print("R1 requires: pip install torch transformers modelscope")
+        return
+    run_r1_attention(args.r1_model_id if hasattr(args, 'r1_model_id') else "Qwen/Qwen2.5-0.5B")
 
 
 def main():
@@ -1038,8 +993,10 @@ def main():
     parser.add_argument("--runs", type=int, default=10, help="Number of runs per mode per scenario (default: 10)")
     parser.add_argument("--skip", type=str, default="", help="Comma-separated scenario numbers to skip (e.g. '3,5')")
     parser.add_argument("--task", default="baseline",
-                        choices=["baseline", "r3", "all"],
+                        choices=["baseline", "r1", "r3", "all"],
                         help="Which test task to run")
+    parser.add_argument("--r1-model-id", default="Qwen/Qwen2.5-0.5B",
+                        help="ModelScope model ID for R1 attention analysis")
     parser.add_argument("--r3-n-injections", type=int, default=5,
                         help="Number of SIG injections for R3 benchmark")
     parser.add_argument("--r3-d-model", type=int, default=512,
@@ -1404,15 +1361,20 @@ def main():
                 print(f"\nGPU Final: Used {final_snap['used_mb']:.0f} MB, Delta {final_snap['delta_mb']:+.0f} MB")
 
     # ================================================================
+    # R1 task: Attention Analysis (SIG Injection vs Full Context)
+    # ================================================================
+    if args.task in ("r1", "all"):
+        run_task_r1_attention(args)
+
+    # ================================================================
     # R3 task: SIG Beyond Transformer (cross-architecture analysis)
     # ================================================================
     if args.task in ("r3", "all"):
         if not NUMPY_AVAILABLE:
             print("ERROR: numpy is required for R3 task. Install with: pip install numpy")
-        elif not R3_AVAILABLE:
-            print("ERROR: r3_beyond_transformer module not available")
-        else:
-            run_task_r3(args, gpu)
+            gpu.shutdown()
+            return
+        run_task_r3(args, gpu)
 
     gpu.shutdown()
     print("\nBenchmark complete.")

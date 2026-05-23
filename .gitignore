@@ -1,1 +1,7 @@
 __pycache__/
+
+models/
+
+modelscope_cache/
+
+test_results*
