@@ -8,15 +8,15 @@ Tasks:
   r2       : KV cache degradation analysis
   r4       : Teacher-student distillation
   r5       : Privacy boundaries
-  r6       : Dynamic re-planning (pure simulation)
-  r7       : Multimodal SIG (pure simulation, needs numpy)
-  r8       : Spatial cognition & sustained attention (pure simulation)
-  r9       : Real-time constrained SIG (pure simulation)
-  r10      : Injection attacks & defense (pure simulation)
-  r11      : Factuality & hallucination (pure simulation)
-  r12      : SIG scaling law (analytical model)
-  r13      : Distributed cognitive outsourcing (pure simulation)
-  r14      : SIG & emerging reasoning paradigms (pure simulation)
+  r6       : Architecture evolution (from research_architecture.py)
+  r7       : Multimodal SIG (from research_embodied.py, needs numpy)
+  r8       : Spatial cognition (from research_embodied.py)
+  r9       : Real-time SIG (from research_embodied.py)
+  r10      : Injection attacks (from research_safety.py)
+  r11      : Factuality & hallucination (from research_safety.py)
+  r12      : SIG scaling law (from research_safety.py)
+  r13      : Distributed CO (from research_architecture.py)
+  r14      : Reasoning paradigms (from research_architecture.py)
   all      : run all tasks sequentially
 
 Requires: pip install -r requirements.txt
@@ -2027,77 +2027,50 @@ def main():
             from transformer_bench import run_r3_empirical, print_r3_empirical
             print_r3_empirical(run_r3_empirical())
 
-    if args.task in ("r6", "all"):
+    if args.task in ("r6", "r13", "r14", "all"):
         try:
-            from r6_dynamic_replanning import run_task_r6
+            from research_architecture import run_task_r6, run_task_r13, run_task_r14
         except ImportError:
-            import r6_dynamic_replanning
-            run_task_r6 = r6_dynamic_replanning.run_task_r6
-        run_task_r6(args)
+            import research_architecture
+            run_task_r6 = research_architecture.run_task_r6
+            run_task_r13 = research_architecture.run_task_r13
+            run_task_r14 = research_architecture.run_task_r14
+        if args.task in ("r6", "all"):
+            run_task_r6(args)
+        if args.task in ("r13", "all"):
+            run_task_r13(args)
+        if args.task in ("r14", "all"):
+            run_task_r14(args)
 
-    if args.task in ("r7", "all"):
+    if args.task in ("r7", "r8", "r9", "all"):
         try:
-            from r7_multimodal_sig import run_task_r7
+            from research_embodied import run_task_r7, run_task_r8, run_task_r9
         except ImportError:
-            import r7_multimodal_sig
-            run_task_r7 = r7_multimodal_sig.run_task_r7
-        run_task_r7(args)
+            import research_embodied
+            run_task_r7 = research_embodied.run_task_r7
+            run_task_r8 = research_embodied.run_task_r8
+            run_task_r9 = research_embodied.run_task_r9
+        if args.task in ("r7", "all"):
+            run_task_r7(args)
+        if args.task in ("r8", "all"):
+            run_task_r8(args)
+        if args.task in ("r9", "all"):
+            run_task_r9(args)
 
-    if args.task in ("r8", "all"):
+    if args.task in ("r10", "r11", "r12", "all"):
         try:
-            from r8_spatial_cognition import run_task_r8
+            from research_safety import run_task_r10, run_task_r11, run_task_r12
         except ImportError:
-            import r8_spatial_cognition
-            run_task_r8 = r8_spatial_cognition.run_task_r8
-        run_task_r8(args)
-
-    if args.task in ("r9", "all"):
-        try:
-            from r9_realtime_sig import run_task_r9
-        except ImportError:
-            import r9_realtime_sig
-            run_task_r9 = r9_realtime_sig.run_task_r9
-        run_task_r9(args)
-
-    if args.task in ("r10", "all"):
-        try:
-            from r10_injection_attacks import run_task_r10
-        except ImportError:
-            import r10_injection_attacks
-            run_task_r10 = r10_injection_attacks.run_task_r10
-        run_task_r10(args)
-
-    if args.task in ("r11", "all"):
-        try:
-            from r11_factuality import run_task_r11
-        except ImportError:
-            import r11_factuality
-            run_task_r11 = r11_factuality.run_task_r11
-        run_task_r11(args)
-
-    if args.task in ("r12", "all"):
-        try:
-            from r12_scaling_law import run_task_r12
-        except ImportError:
-            import r12_scaling_law
-            run_task_r12 = r12_scaling_law.run_task_r12
-        run_task_r12(args)
-
-    if args.task in ("r13", "all"):
-        try:
-            from r13_distributed_co import run_task_r13
-        except ImportError:
-            import r13_distributed_co
-            run_task_r13 = r13_distributed_co.run_task_r13
-        run_task_r13(args)
-
-    if args.task in ("r14", "all"):
-        try:
-            from r14_reasoning_paradigms import run_task_r14
-        except ImportError:
-            import r14_reasoning_paradigms
-            run_task_r14 = r14_reasoning_paradigms.run_task_r14
-        run_task_r14(args)
+            import research_safety
+            run_task_r10 = research_safety.run_task_r10
+            run_task_r11 = research_safety.run_task_r11
+            run_task_r12 = research_safety.run_task_r12
+        if args.task in ("r10", "all"):
+            run_task_r10(args)
+        if args.task in ("r11", "all"):
+            run_task_r11(args)
+        if args.task in ("r12", "all"):
+            run_task_r12(args)
 
     gpu.shutdown()
     print("\nDone.")
