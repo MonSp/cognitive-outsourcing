@@ -1,0 +1,163 @@
+{
+  "model": "Qwen3.5-0.8B",
+  "runs_per_task": 5,
+  "started": "2026-05-26T10:37:45.634438",
+  "total_ok": 30,
+  "total_fail": 0,
+  "aggregated": {
+    "kitchen": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "AppLoop": {
+        "wc_mean": 2.04,
+        "wc_std": 0.05477225575051666,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 0.8,
+        "gen_std": 0.0,
+        "pf_mean": 1.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 0.9107142857142858
+      },
+      "AppLoop-PC": {
+        "wc_mean": 4.42,
+        "wc_std": 0.044721359549995635,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 17.0,
+        "completed_std": 0.0,
+        "gen_mean": 3.4200000000000004,
+        "gen_std": 0.044721359549995836,
+        "pf_mean": 0.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 1.9732142857142858
+      },
+      "AppLoop-Sliding": {
+        "wc_mean": 4.1,
+        "wc_std": 0.0,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 1.6,
+        "gen_std": 0.0,
+        "pf_mean": 2.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 1.8303571428571428
+      },
+      "SIG": {
+        "wc_mean": 2.2399999999999998,
+        "wc_std": 0.05477225575051642,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 1.52,
+        "gen_std": 0.044721359549995836,
+        "pf_mean": 0.1,
+        "pf_std": 0.0
+      },
+      "SIG-Hybrid": {
+        "wc_mean": 0.0,
+        "wc_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 0.0,
+        "completed_std": 0.0,
+        "gen_mean": 0.0,
+        "gen_std": 0.0,
+        "pf_mean": 0.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 0.0
+      }
+    },
+    "r15": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "pure_sig_s_mean": 2.2399999999999998,
+      "pure_sig_s_std": 0.05477225575051642,
+      "pure_app_s_mean": 2.08,
+      "pure_app_s_std": 0.044721359549995836,
+      "sig_app_speedup_mean": 0.9,
+      "sig_app_speedup_std": 0.0
+    },
+    "r16": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "avg_switch_ms_mean": 122.576,
+      "avg_switch_ms_std": 0.5768275305496461,
+      "total_wc_s_mean": 8.4,
+      "total_wc_s_std": 0.0
+    },
+    "r17": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "Drop-25%": {
+        "wc_mean": 2.1399999999999997,
+        "wc_std": 0.05477225575051666,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "cache_mean": 956.0,
+        "cache_std": 0.0
+      },
+      "Drop-50%": {
+        "wc_mean": 2.0,
+        "wc_std": 0.0,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "cache_mean": 353.0,
+        "cache_std": 0.0
+      },
+      "None": {
+        "wc_mean": 2.5799999999999996,
+        "wc_std": 0.044721359549995836,
+        "f1_mean": 1.0,
+        "f1_std": 0.0,
+        "cache_mean": 2320.0,
+        "cache_std": 0.0
+      },
+      "Recent-30": {
+        "wc_mean": 2.54,
+        "wc_std": 0.05477225575051666,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "cache_mean": 1659.0,
+        "cache_std": 0.0
+      }
+    },
+    "r18": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "speedup_mean": 0.8,
+      "speedup_std": 0.0,
+      "sig_wc_s_mean": 1.92,
+      "sig_wc_s_std": 0.044721359549995836,
+      "app_wc_s_mean": 1.6,
+      "app_wc_s_std": 0.0,
+      "sig_pf_s_mean": 0.1,
+      "sig_pf_s_std": 0.0,
+      "app_pf_s_mean": 0.8,
+      "app_pf_s_std": 0.0,
+      "overlap_pct_mean": 5.58,
+      "overlap_pct_std": 0.08366600265340758
+    },
+    "r19": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "total_tokens_mean": 257.0,
+      "total_tokens_std": 0.0,
+      "reencode_ms_mean": 18.8,
+      "reencode_ms_std": 0.4472135954999579
+    }
+  },
+  "raw_counts": {
+    "kitchen": 5,
+    "r15": 5,
+    "r16": 5,
+    "r17": 5,
+    "r18": 5,
+    "r19": 5
+  }
+}

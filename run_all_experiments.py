@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Comprehensive Data Collection Orchestrator for CO+SIG Research Vectors R6-R14.
+Comprehensive Data Collection Orchestrator for CO+SIG Research Vectors R6-R19 + EdgeAgent-Kitchen.
 
-Runs ALL experiments across three test harnesses, captures stdout to
+Runs ALL experiments across four test harnesses, captures stdout to
 timestamped log files, and prints a summary of results.
 
 Usage:
   python run_all_experiments.py --model models/Qwen3.5-0.8B-Q4_K_M.gguf --n-gpu-layers 99
-  python run_all_experiments.py --model ... --only r6,r10,r12
+  python run_all_experiments.py --model ... --only r6,r10,e15
   python run_all_experiments.py --model ... --skip r7,r9
   python run_all_experiments.py --dry-run
 """
@@ -83,16 +83,61 @@ TASK_CONFIG = {
         "description": "SIG + Reasoning Paradigms — CoT+SIG vs CoT+AppLoop vs AppLoop-PC",
         "default_runs": 30,
     },
+    "kitchen": {
+        "script": "edge_agent_bench.py",
+        "needs_model": True,
+        "description": "EdgeAgent-Kitchen — 5 baselines, 65-step interleaved agent task",
+        "default_runs": 1,
+    },
+    "e15": {
+        "script": "edge_agent_bench.py",
+        "needs_model": True,
+        "description": "Hybrid Scheduling — SIG vs AppLoop-PC adaptive switching (R15)",
+        "default_runs": 1,
+    },
+    "e16": {
+        "script": "edge_agent_bench.py",
+        "needs_model": True,
+        "description": "Multi-Sequence Concurrency — multi-tenant KV isolation (R16)",
+        "default_runs": 1,
+    },
+    "e17": {
+        "script": "edge_agent_bench.py",
+        "needs_model": True,
+        "description": "Context Aging & Compression — KV memory management (R17)",
+        "default_runs": 1,
+    },
+    "e18": {
+        "script": "edge_agent_bench.py",
+        "needs_model": True,
+        "description": "Prefill-Decode Pipeline — SIG + speculative decoding (R18)",
+        "default_runs": 1,
+    },
+    "e19": {
+        "script": "edge_agent_bench.py",
+        "needs_model": True,
+        "description": "Edge Cluster Fragment Routing — distributed KV (R19)",
+        "default_runs": 1,
+    },
 }
 
-TASK_ORDER = ["r6", "r7", "r8", "r9", "r10", "r11", "r12", "r13", "r14"]
+TASK_ORDER = ["r6", "r7", "r8", "r9", "r10", "r11", "r12", "r13", "r14",
+              "kitchen", "e15", "e16", "e17", "e18", "e19"]
+
+
+EDGE_TASK_MAP = {
+    "kitchen": "kitchen",
+    "e15": "r15", "e16": "r16", "e17": "r17",
+    "e18": "r18", "e19": "r19",
+}
 
 
 def build_command(task_id, model, n_gpu_layers, n_ctx):
     config = TASK_CONFIG[task_id]
     script = os.path.join(PROJECT, config["script"])
 
-    base_args = ["--task", task_id]
+    actual_task = EDGE_TASK_MAP.get(task_id, task_id)
+    base_args = ["--task", actual_task]
 
     if config["needs_model"]:
         base_args.extend(["--model", model])
@@ -309,7 +354,7 @@ Examples:
     started_at = datetime.now()
 
     print("=" * 70)
-    print("  CO+SIG Comprehensive Data Collection — R6 through R14")
+    print("  CO+SIG Comprehensive Data Collection — R6 through R19 + Kitchen")
     print("=" * 70)
     print(f"\n  Model:     {args.model if args.model else '(not specified — model-dependent tasks will skip)'}")
     print(f"  n_ctx:     {args.n_ctx}")

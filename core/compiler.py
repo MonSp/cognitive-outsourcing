@@ -58,7 +58,7 @@ class MeaningCompiler:
         return self.llm.detokenize(ids).decode("utf-8", errors="replace")
 
     def reset_cache(self):
-        self.llm._ctx.kv_cache_seq_rm(SEQ_ID, -1, -1)
+        self.llm._ctx.kv_cache_clear()
         self.llm.n_tokens = 0
 
     def eval(self, tokens: List[int]):
@@ -85,6 +85,9 @@ class MeaningCompiler:
 
     def kv_cache_seq_keep(self, seq_id: int):
         self.llm._ctx.kv_cache_seq_keep(seq_id)
+
+    def kv_cache_seq_shift(self, seq_id: int, p0: int, p1: int, shift: int):
+        self.llm._ctx.kv_cache_seq_shift(seq_id, p0, p1, shift)
 
     def set_n_tokens(self, n: int):
         """Set logical token position counter — required after kv_cache_seq_cp."""
@@ -142,15 +145,16 @@ class MeaningCompiler:
         stop_str: str,
         max_new: int = 300,
         rep_threshold: int = 3,
+        min_tokens_before_stop: int = 5,
     ) -> Tuple[str, List[int]]:
         gen_ids: List[int] = []
         for _ in range(max_new):
             token = self.sample()
             gen_ids.append(token)
             cur = self.detokenize(gen_ids)
-            if stop_str in cur:
+            if len(gen_ids) >= min_tokens_before_stop and stop_str in cur:
                 return cur.split(stop_str)[0], gen_ids
-            if "Assistant:" in cur or "assistant:" in cur:
+            if len(gen_ids) >= min_tokens_before_stop and ("Assistant:" in cur or "assistant:" in cur):
                 return cur, gen_ids
             if self._detect_repetition(cur, threshold=rep_threshold):
                 break

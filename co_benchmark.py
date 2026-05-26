@@ -4,19 +4,11 @@ Cognitive Outsourcing Benchmark — Unified Entry Point
 =====================================================
 Tasks:
   baseline : CO+AppLoop vs CO+SIG benchmark (9 scenarios)
-  r1       : Injection information theory analysis
-  r2       : KV cache degradation analysis
-  r4       : Teacher-student distillation
-  r5       : Privacy boundaries
-  r6       : Architecture evolution (from research_architecture.py)
-  r7       : Multimodal SIG (from research_embodied.py, needs numpy)
-  r8       : Spatial cognition (from research_embodied.py)
-  r9       : Real-time SIG (from research_embodied.py)
-  r10      : Injection attacks (from research_safety.py)
-  r11      : Factuality & hallucination (from research_safety.py)
-  r12      : SIG scaling law (from research_safety.py)
-  r13      : Distributed CO (from research_architecture.py)
-  r14      : Reasoning paradigms (from research_architecture.py)
+  r1-r14   : Legacy research vectors (info theory, degradation, safety, scaling, etc.)
+  r15      : UQ3: CoT+SIG multi-step reasoning accuracy
+  kitchen  : EdgeAgent-Kitchen full benchmark (5 baselines, 50-200 steps)
+  e15-e19  : New edge-agent research vectors (SIG-centric design space)
+  e2e      : kitchen + all e15-e19
   all      : run all tasks sequentially
 
 Requires: pip install -r requirements.txt
@@ -2475,8 +2467,10 @@ def main():
     parser.add_argument("--task", default="baseline",
                         choices=["baseline", "r1", "r2", "r3", "r4", "r5",
                                  "r6", "r7", "r8", "r9", "r10", "r11",
-                                 "r12", "r13", "r14", "r15", "all"],
-                        help="Which test task to run")
+                                 "r12", "r13", "r14", "r15",
+                                 "kitchen", "e15", "e16", "e17", "e18", "e19",
+                                 "e2e", "all"],
+                        help="Which test task to run (kitchen/e15-e19=e2e edge-agent bench)")
     parser.add_argument("--r2-n-cities", type=int, default=8)
     parser.add_argument("--r2-probe-interval", type=int, default=3)
     parser.add_argument("--r2-budget-ratio", type=float, default=0.5)
@@ -2505,7 +2499,10 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(name)s - %(levelname)s - %(message)s")
 
-    needs_model = args.task in ("baseline", "r1", "r2", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "all")
+    needs_model = args.task in ("baseline", "r1", "r2", "r6", "r7", "r8", "r9",
+                                 "r10", "r11", "r12", "r13", "r14", "r15",
+                                 "kitchen", "e15", "e16", "e17", "e18", "e19",
+                                 "e2e", "all")
     if needs_model and not args.model:
         parser.error(f"--task {args.task} requires --model MODEL")
     gpu = GPUMonitor()
@@ -2577,6 +2574,30 @@ def main():
                 run_task_r11(args, compiler, module, gpu)
             if args.task in ("r12", "all"):
                 run_task_r12(args, compiler, module, gpu)
+
+    EDGE_TASKS = {"kitchen", "e15", "e16", "e17", "e18", "e19", "e2e"}
+    if args.task in EDGE_TASKS or args.task == "all":
+        try:
+            from edge_agent_bench import (
+                KitchenToolRegistry, run_kitchen as ea_kitchen,
+                run_r15 as ea_r15, run_r16 as ea_r16,
+                run_r17 as ea_r17, run_r18 as ea_r18, run_r19 as ea_r19)
+            edge_tools = KitchenToolRegistry()
+        except ImportError:
+            print("  Edge agent tasks require edge_agent_bench.py.")
+        else:
+            if args.task in ("kitchen", "e2e", "all"):
+                ea_kitchen(args, compiler, edge_tools)
+            if args.task in ("e15", "e2e", "all"):
+                ea_r15(args, compiler, edge_tools)
+            if args.task in ("e16", "e2e", "all"):
+                ea_r16(args, compiler, edge_tools)
+            if args.task in ("e17", "e2e", "all"):
+                ea_r17(args, compiler, edge_tools)
+            if args.task in ("e18", "e2e", "all"):
+                ea_r18(args, compiler, edge_tools)
+            if args.task in ("e19", "e2e", "all"):
+                ea_r19(args, compiler, edge_tools)
 
     gpu.shutdown()
     print("\nDone.")

@@ -1,0 +1,154 @@
+{
+  "model": "Qwen3.5-4B",
+  "runs_per_task": 3,
+  "started": "2026-05-26T15:57:04.378548",
+  "total_ok": 15,
+  "total_fail": 0,
+  "aggregated": {
+    "kitchen": {
+      "n_runs": 3,
+      "n_valid": 3,
+      "AppLoop": {
+        "wc_mean": 15.799999999999999,
+        "wc_std": 0.10000000000000053,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 9.033333333333333,
+        "gen_std": 0.05773502691896237,
+        "pf_mean": 5.466666666666666,
+        "pf_std": 0.05773502691896237,
+        "speedup_vs_sig": 2.5483870967741935
+      },
+      "AppLoop-PC": {
+        "wc_mean": 23.5,
+        "wc_std": 0.10000000000000142,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 15.466666666666667,
+        "gen_std": 0.05773502691896237,
+        "pf_mean": 0.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 3.790322580645161
+      },
+      "AppLoop-Sliding": {
+        "wc_mean": 15.866666666666667,
+        "wc_std": 0.05773502691896237,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 9.1,
+        "gen_std": 0.0,
+        "pf_mean": 5.5,
+        "pf_std": 0.09999999999999964,
+        "speedup_vs_sig": 2.5591397849462365
+      },
+      "SIG": {
+        "wc_mean": 6.2,
+        "wc_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 4.7,
+        "gen_std": 0.0,
+        "pf_mean": 0.10000000000000002,
+        "pf_std": 1.6996749443881478e-17
+      },
+      "SIG-Hybrid": {
+        "wc_mean": 3.7999999999999994,
+        "wc_std": 5.438959822042073e-16,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 2.7999999999999994,
+        "gen_std": 5.438959822042073e-16,
+        "pf_mean": 0.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 0.6129032258064515
+      }
+    },
+    "r15": {
+      "n_runs": 3,
+      "n_valid": 3,
+      "pure_sig_s_mean": 6.2,
+      "pure_sig_s_std": 0.0,
+      "pure_app_s_mean": 15.9,
+      "pure_app_s_std": 0.0,
+      "sig_app_speedup_mean": 2.5,
+      "sig_app_speedup_std": 0.0
+    },
+    "r16": {
+      "n_runs": 3,
+      "n_valid": 3,
+      "avg_switch_ms_mean": 245.97333333333336,
+      "avg_switch_ms_std": 0.19347695814575716,
+      "total_wc_s_mean": 18.233333333333334,
+      "total_wc_s_std": 0.0577350269189634
+    },
+    "r17": {
+      "n_runs": 3,
+      "n_valid": 3,
+      "Drop-25%": {
+        "wc_mean": 6.900000000000001,
+        "wc_std": 1.0877919644084146e-15,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "cache_mean": 1006.0,
+        "cache_std": 0.0
+      },
+      "Drop-50%": {
+        "wc_mean": 6.733333333333333,
+        "wc_std": 0.05773502691896237,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "cache_mean": 386.0,
+        "cache_std": 0.0
+      },
+      "None": {
+        "wc_mean": 6.599999999999999,
+        "wc_std": 1.0877919644084146e-15,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "cache_mean": 2336.0,
+        "cache_std": 0.0
+      },
+      "Recent-30": {
+        "wc_mean": 9.4,
+        "wc_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "cache_mean": 1602.0,
+        "cache_std": 0.0
+      }
+    },
+    "r18": {
+      "n_runs": 3,
+      "n_valid": 3,
+      "speedup_mean": 4.0,
+      "speedup_std": 0.0,
+      "sig_wc_s_mean": 3.4,
+      "sig_wc_s_std": 0.0,
+      "app_wc_s_mean": 13.566666666666668,
+      "app_wc_s_std": 0.11547005383792475,
+      "sig_pf_s_mean": 0.10000000000000002,
+      "sig_pf_s_std": 1.6996749443881478e-17,
+      "app_pf_s_mean": 4.633333333333333,
+      "app_pf_s_std": 0.05773502691896288,
+      "overlap_pct_mean": 3.266666666666667,
+      "overlap_pct_std": 0.05773502691896237
+    }
+  },
+  "raw_counts": {
+    "kitchen": 3,
+    "r15": 3,
+    "r16": 3,
+    "r17": 3,
+    "r18": 3
+  }
+}

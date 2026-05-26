@@ -72,8 +72,14 @@ class InjectionEngine:
         self.position_map = []
 
     def evict_range(self, p0: int, p1: int):
-        """Remove KV pairs in the position range [p0, p1) from the cache."""
-        self.compiler.kv_cache_seq_rm(SEQ_ID, p0, p1)
+        """Remove KV pairs in the position range [p0, p1) and compact
+        by rebuilding the cache from the remaining token IDs.
+
+        Uses rebuild_cache (reset + re-eval) instead of in-place shift to
+        guarantee correctness across all model architectures.
+        """
+        self.cached_ids = self.cached_ids[:p0] + self.cached_ids[p1:]
+        self.compiler.rebuild_cache(self.cached_ids)
 
     @property
     def cache_size(self) -> int:

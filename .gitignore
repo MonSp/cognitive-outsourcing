@@ -7,3 +7,5 @@ modelscope_cache/
 test_results*
 
 logs/
+
+bench_logs*

@@ -1,0 +1,163 @@
+{
+  "model": "Qwen3.5-4B-CPU",
+  "runs_per_task": 5,
+  "started": "2026-05-26T12:53:32.937213",
+  "total_ok": 30,
+  "total_fail": 0,
+  "aggregated": {
+    "kitchen": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "AppLoop": {
+        "wc_mean": 152.8,
+        "wc_std": 0.5244044240850771,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 101.53999999999999,
+        "gen_std": 0.1673320053068111,
+        "pf_mean": 41.86,
+        "pf_std": 0.5128352561983232,
+        "speedup_vs_sig": 4.232686980609419
+      },
+      "AppLoop-PC": {
+        "wc_mean": 91.46000000000001,
+        "wc_std": 0.21908902300206373,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 17.0,
+        "completed_std": 0.0,
+        "gen_mean": 72.28,
+        "gen_std": 0.08366600265340789,
+        "pf_mean": 0.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 2.5335180055401665
+      },
+      "AppLoop-Sliding": {
+        "wc_mean": 88.92,
+        "wc_std": 0.2588435821108966,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 13.0,
+        "completed_std": 0.0,
+        "gen_mean": 71.36000000000001,
+        "gen_std": 0.30495901363953337,
+        "pf_mean": 14.220000000000002,
+        "pf_std": 0.21679483388678816,
+        "speedup_vs_sig": 2.463157894736842
+      },
+      "SIG": {
+        "wc_mean": 36.1,
+        "wc_std": 0.21213203435596392,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "completed_mean": 32.0,
+        "completed_std": 0.0,
+        "gen_mean": 18.64,
+        "gen_std": 0.13416407864998744,
+        "pf_mean": 0.8400000000000001,
+        "pf_std": 0.0547722557505166
+      },
+      "SIG-Hybrid": {
+        "wc_mean": 0.0,
+        "wc_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "completed_mean": 0.0,
+        "completed_std": 0.0,
+        "gen_mean": 0.0,
+        "gen_std": 0.0,
+        "pf_mean": 0.0,
+        "pf_std": 0.0,
+        "speedup_vs_sig": 0.0
+      }
+    },
+    "r15": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "pure_sig_s_mean": 36.42,
+      "pure_sig_s_std": 0.7854934754662182,
+      "pure_app_s_mean": 154.18,
+      "pure_app_s_std": 1.6946976131451852,
+      "sig_app_speedup_mean": 4.26,
+      "sig_app_speedup_std": 0.05477225575051641
+    },
+    "r16": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "avg_switch_ms_mean": 3605.726,
+      "avg_switch_ms_std": 6.523812535626594,
+      "total_wc_s_mean": 209.2,
+      "total_wc_s_std": 0.2449489742783184
+    },
+    "r17": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "Drop-25%": {
+        "wc_mean": 4.7,
+        "wc_std": 0.0,
+        "f1_mean": 1.0,
+        "f1_std": 0.0,
+        "cache_mean": 932.0,
+        "cache_std": 0.0
+      },
+      "Drop-50%": {
+        "wc_mean": 4.2,
+        "wc_std": 0.0,
+        "f1_mean": 0.0,
+        "f1_std": 0.0,
+        "cache_mean": 347.0,
+        "cache_std": 0.0
+      },
+      "None": {
+        "wc_mean": 4.2,
+        "wc_std": 0.0,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "cache_mean": 2087.0,
+        "cache_std": 0.0
+      },
+      "Recent-30": {
+        "wc_mean": 4.2,
+        "wc_std": 0.0,
+        "f1_mean": 0.5,
+        "f1_std": 0.0,
+        "cache_mean": 1436.0,
+        "cache_std": 0.0
+      }
+    },
+    "r18": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "speedup_mean": 4.3,
+      "speedup_std": 0.0,
+      "sig_wc_s_mean": 3.1,
+      "sig_wc_s_std": 0.0,
+      "app_wc_s_mean": 13.459999999999999,
+      "app_wc_s_std": 0.08944271909999127,
+      "sig_pf_s_mean": 0.1,
+      "sig_pf_s_std": 0.0,
+      "app_pf_s_mean": 4.6,
+      "app_pf_s_std": 0.0,
+      "overlap_pct_mean": 3.4800000000000004,
+      "overlap_pct_std": 0.13038404810405307
+    },
+    "r19": {
+      "n_runs": 5,
+      "n_valid": 5,
+      "total_tokens_mean": 257.0,
+      "total_tokens_std": 0.0,
+      "reencode_ms_mean": 19.0,
+      "reencode_ms_std": 0.7071067811865476
+    }
+  },
+  "raw_counts": {
+    "kitchen": 5,
+    "r15": 5,
+    "r16": 5,
+    "r17": 5,
+    "r18": 5,
+    "r19": 5
+  }
+}
