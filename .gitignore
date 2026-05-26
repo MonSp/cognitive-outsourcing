@@ -5,3 +5,5 @@ models/
 modelscope_cache/
 
 test_results*
+
+logs/

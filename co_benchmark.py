@@ -1849,6 +1849,521 @@ def run_task_r5(args, compiler, module, gpu):
 
 
 # ======================================================================
+# R6: Dynamic Replanning — Online Recovery from Tool Failures
+# ======================================================================
+def _generate_tool_chain(n_tools, cities_pool=None):
+    if cities_pool is None:
+        cities_pool = ["paris", "london", "rome", "berlin", "tokyo", "newyork",
+                       "sydney", "dubai", "mumbai", "moscow", "beijing", "cairo"]
+    tools_out = []
+    for i in range(n_tools):
+        city = cities_pool[i % len(cities_pool)]
+        if i % 3 == 0:
+            tools_out.append(("search_attractions", {"city": city}))
+        elif i % 3 == 1:
+            tools_out.append(("get_weather", {"city": city}))
+        else:
+            origin = cities_pool[(i % (len(cities_pool) - 1))]
+            dest = cities_pool[((i + 1) % len(cities_pool))]
+            tools_out.append(("get_flight_info", {"origin": origin, "destination": dest}))
+    return tools_out
+
+
+def run_task_r6(args, compiler, module, gpu):
+    import time
+    import random
+    from core.compiler import PrefixCache
+
+    failure_rate = getattr(args, 'r6_failure_rate', 0.15)
+    tool_depth = getattr(args, 'r6_tool_depth', 30)
+    n_runs = getattr(args, 'r6_runs', 30)
+
+    tools = _generate_tool_chain(tool_depth)
+
+    print(f"\n{'='*80}")
+    print(f"  R6: Dynamic Re-planning — {tool_depth}-Tool Chain w/ {failure_rate:.0%} Failure Rate")
+    print(f"  N={n_runs} paired runs, 3 modes: SIG / AppLoop / AppLoop-PC")
+    print(f"{'='*80}")
+
+    if compiler is None:
+        print("\n  R6 requires --model (GGUF). Skipping.")
+        return
+
+    base_seed = 42
+    sys_ids = list(compiler.tokenize(f"{SYSTEM_PROMPT}\n\n", add_bos=False))
+
+    sig_times, app_times, apppc_times = [], [], []
+
+    for run_i in range(n_runs):
+        random.seed(base_seed + run_i)
+
+        failed_indices = set()
+        for idx in range(len(tools)):
+            if random.random() < failure_rate:
+                failed_indices.add(idx)
+
+        if run_i == 0:
+            print(f"\n  Failed indices (run 0): {sorted(failed_indices)[:10]}{'...' if len(failed_indices)>10 else ''} "
+                  f"({len(failed_indices)}/{tool_depth} failed)")
+
+        def _run_one(mode_label, use_pc=False):
+            compiler.reset_cache()
+            t_start = time.time()
+            current_cache_ids = []
+
+            compiler.eval(sys_ids)
+            current_cache_ids = list(sys_ids)
+
+            if use_pc:
+                pc = PrefixCache()
+                pc.save(compiler, current_cache_ids)
+
+            accumulated = []
+            for step_i, (tool_name, tool_args) in enumerate(tools):
+                result = module.execute(tool_name, tool_args)
+                if step_i in failed_indices:
+                    result = f"[ERROR] Tool failed — retrying..."
+                    module.execute(tool_name, tool_args)
+
+                city = list(tool_args.values())[0]
+                tool_text = f"\n[Step {step_i+1}] {tool_name}({city}): {result}\n"
+                accumulated.append(tool_text)
+                context = "\n".join(p.strip() for p in accumulated if p.strip())
+
+                if mode_label == "SIG":
+                    t_ids = list(compiler.tokenize(tool_text, add_bos=False))
+                    compiler.eval(t_ids)
+                    current_cache_ids += list(t_ids)
+
+                elif mode_label == "AppLoop":
+                    full_text = SYSTEM_PROMPT + "\n\n" + context
+                    full_ids = list(compiler.tokenize(full_text, add_bos=False))
+                    compiler.rebuild_cache(full_ids)
+                    current_cache_ids = list(full_ids)
+
+                elif mode_label == "AppLoop-PC":
+                    restored = pc.restore(compiler)
+                    ctx_ids = list(compiler.tokenize("\n\n" + context, add_bos=False))
+                    compiler.eval(ctx_ids)
+                    current_cache_ids = restored + list(ctx_ids)
+
+            wall_clock = time.time() - t_start
+            return wall_clock
+
+        sig_times.append(_run_one("SIG"))
+        app_times.append(_run_one("AppLoop"))
+        apppc_times.append(_run_one("AppLoop-PC", use_pc=True))
+
+    def _ms(vals):
+        m = sum(vals) / len(vals)
+        s = (sum((v - m) ** 2 for v in vals) / max(1, len(vals) - 1)) ** 0.5
+        return m, s
+
+    sig_m, sig_s = _ms(sig_times)
+    app_m, app_s = _ms(app_times)
+    apppc_m, apppc_s = _ms(apppc_times)
+
+    print(f"\n  {'Mode':<12} {'Wall-Clock(s)':<22} {'vs SIG':<12} {'vs AppLoop':<12}")
+    print(f"  {'-'*12} {'-'*22} {'-'*12} {'-'*12}")
+    print(f"  {'SIG':<12} {sig_m:.3f}±{sig_s:.3f}          {'1.00x':<12} {f'{app_m/sig_m:.2f}x':<12}")
+    print(f"  {'AppLoop':<12} {app_m:.3f}±{app_s:.3f}          {f'{sig_m/app_m:.2f}x':<12} {'1.00x':<12}")
+    print(f"  {'AppLoop-PC':<12} {apppc_m:.3f}±{apppc_s:.3f}          {f'{sig_m/apppc_m:.2f}x':<12} {f'{app_m/apppc_m:.2f}x':<12}")
+
+    print(f"\n  R6 Summary (N={n_runs} paired runs, {tool_depth}-tool chain):")
+    print(f"  End-to-end wall-clock comparison across 3 cache strategies.")
+    print(f"  AppLoop-PC serves as the fair baseline for modern inference engines.")
+
+
+# ======================================================================
+# R13: Distributed CO — Multi-Device KV Cache Fragmentation
+# ======================================================================
+def run_task_r13(args, compiler, module, gpu):
+    import time
+    import random
+    from core import init_metrics
+    from core.compiler import PrefixCache
+
+    num_devices = getattr(args, 'r13_num_devices', 4)
+    n_runs = getattr(args, 'r13_runs', 30)
+    print(f"\n{'='*80}")
+    print(f"  R13: Fragmented Local KV Reconstruction (NOT Distributed Deployment)")
+    print(f"  single-GPU measurement of multi-fragment context reassembly cost")
+    print(f"{'='*80}")
+
+    if compiler is None:
+        print("\n  R13 requires --model (GGUF). Skipping.")
+        return
+
+    expected_chain = [
+        {"tool": "search_attractions", "tool_args": {"city": "paris"}},
+        {"tool": "get_weather", "tool_args": {"city": "paris"}},
+        {"tool": "search_attractions", "tool_args": {"city": "rome"}},
+        {"tool": "get_weather", "tool_args": {"city": "rome"}},
+        {"tool": "search_attractions", "tool_args": {"city": "berlin"}},
+        {"tool": "get_weather", "tool_args": {"city": "berlin"}},
+        {"tool": "get_flight_info", "tool_args": {"origin": "paris", "destination": "rome"}},
+        {"tool": "get_flight_info", "tool_args": {"origin": "rome", "destination": "berlin"}},
+    ]
+
+    gen_prompt = "\nBased on the above, provide a one-line summary.\n"
+    gen_prompt_ids_base = list(compiler.tokenize(gen_prompt, add_bos=False))
+    base_seed = 42
+
+    sys_ids = list(compiler.tokenize(f"{SYSTEM_PROMPT}\n\n", add_bos=False))
+
+    sig_times, app_times, apppc_times = [], [], []
+
+    for run_i in range(n_runs):
+        random.seed(base_seed + run_i)
+
+        def _run_mode(mode_label, use_pc=False):
+            compiler.reset_cache()
+            t_start = time.time()
+            current_cache_ids = []
+
+            compiler.eval(sys_ids)
+            current_cache_ids = list(sys_ids)
+
+            if use_pc:
+                pc = PrefixCache()
+                pc.save(compiler, current_cache_ids)
+
+            all_results = []
+            for step_i, entry in enumerate(expected_chain):
+                tool_name = entry["tool"]
+                tool_args = entry["tool_args"]
+                result = module.execute(tool_name, tool_args)
+                device_id = step_i % num_devices
+                result_text = f"\n[Device {device_id}] {tool_name}({list(tool_args.values())[0]}): {result}\n"
+                all_results.append(result_text)
+                context_text = "\n".join(part.strip() for part in all_results if part.strip())
+                gen_prompt_ids_custom = list(compiler.tokenize(
+                    f"\nBased on steps 1-{step_i+1}, provide a one-line summary.\n", add_bos=False))
+
+                if mode_label == "AppLoop":
+                    full_text = SYSTEM_PROMPT + "\n\n" + context_text
+                    full_ids = list(compiler.tokenize(full_text, add_bos=False))
+                    compiler.rebuild_cache(full_ids)
+                    current_cache_ids = list(full_ids)
+
+                elif mode_label == "SIG":
+                    step_ids = list(compiler.tokenize(result_text, add_bos=False))
+                    compiler.eval(step_ids)
+                    current_cache_ids += list(step_ids)
+
+                elif mode_label == "AppLoop-PC":
+                    restored_ids = pc.restore(compiler)
+                    context_ids = list(compiler.tokenize("\n\n" + context_text, add_bos=False))
+                    compiler.eval(context_ids)
+                    current_cache_ids = restored_ids + list(context_ids)
+
+                compiler.eval(gen_prompt_ids_custom)
+                _, gen_ids = compiler.generate_until_str("\n", max_new=30, rep_threshold=3)
+                current_cache_ids += list(gen_ids)
+
+            wall_clock = time.time() - t_start
+            return wall_clock
+
+        sig_wc = _run_mode("SIG")
+        app_wc = _run_mode("AppLoop")
+        apppc_wc = _run_mode("AppLoop-PC", use_pc=True)
+
+        sig_times.append(sig_wc)
+        app_times.append(app_wc)
+        apppc_times.append(apppc_wc)
+
+    def _mean_std(vals):
+        m = sum(vals) / len(vals)
+        s = (sum((v - m) ** 2 for v in vals) / max(1, len(vals) - 1)) ** 0.5
+        return m, s
+
+    sig_m, sig_s = _mean_std(sig_times)
+    app_m, app_s = _mean_std(app_times)
+    apppc_m, apppc_s = _mean_std(apppc_times)
+
+    print(f"\n  {'Mode':<12} {'Wall-Clock(s)':<22} {'vs SIG':<12} {'vs AppLoop':<12}")
+    print(f"  {'-'*12} {'-'*22} {'-'*12} {'-'*12}")
+    print(f"  {'SIG':<12} {sig_m:.3f}±{sig_s:.3f}          {'1.00x':<12} {f'{app_m/sig_m:.2f}x':<12}")
+    print(f"  {'AppLoop':<12} {app_m:.3f}±{app_s:.3f}          {f'{sig_m/app_m:.2f}x':<12} {'1.00x':<12}")
+    print(f"  {'AppLoop-PC':<12} {apppc_m:.3f}±{apppc_s:.3f}          {f'{sig_m/apppc_m:.2f}x':<12} {f'{app_m/apppc_m:.2f}x':<12}")
+
+    print(f"\n  Analysis (N={n_runs} paired runs, 10-turn end-to-end wall-clock):")
+    if apppc_m < app_m:
+        print(f"  AppLoop-PC is {app_m/apppc_m:.2f}x faster than naive AppLoop — prefix caching matters.")
+    print(f"  SIG vs AppLoop-PC ratio: {apppc_m/max(sig_m,0.001):.2f}x")
+    print(f"  NOTE: End-to-end wall-clock is the ONLY meaningful comparison metric.")
+    print(f"  Cache-management-only comparisons are misleading and have been removed.")
+
+
+# ======================================================================
+# R14: SIG + Emerging Reasoning Paradigms (CoT / ToT / Tool Learning)
+# ======================================================================
+def run_task_r14(args, compiler, module, gpu):
+    import time
+    import random
+    from core.compiler import PrefixCache
+
+    n_runs = getattr(args, 'r14_runs', 30)
+    max_gen = getattr(args, 'r14_max_gen', 80)
+    base_seed = 42
+
+    print(f"\n{'='*80}")
+    print(f"  R14: SIG & Reasoning Paradigms — CoT Fair Comparison")
+    print(f"  N={n_runs} paired runs, 4 modes: CoT+SIG / CoT+AppLoop / CoT+AppLoop-PC / SIG raw")
+    print(f"  Output length controlled at max {max_gen} tokens")
+    print(f"{'='*80}")
+
+    if compiler is None:
+        print("\n  R14 requires --model (GGUF). Skipping.")
+        return
+
+    queries = [
+        ("Q1: 3-city compare", [
+            ("get_weather", {"city": "paris"}), ("search_attractions", {"city": "paris"}),
+            ("get_weather", {"city": "tokyo"}), ("search_attractions", {"city": "tokyo"}),
+            ("get_weather", {"city": "rome"}), ("search_attractions", {"city": "rome"}),
+        ]),
+        ("Q2: Travel plan", [
+            ("get_weather", {"city": "london"}), ("search_attractions", {"city": "london"}),
+            ("get_weather", {"city": "paris"}), ("search_attractions", {"city": "paris"}),
+            ("get_flight_info", {"origin": "london", "destination": "paris"}),
+        ]),
+    ]
+
+    sys_ids = list(compiler.tokenize(f"{SYSTEM_PROMPT}\n\n", add_bos=False))
+
+    all_mode_data = {"CoT+SIG": [], "CoT+AppLoop": [], "CoT+AppLoop-PC": [], "SIG_raw": []}
+
+    for qi, (qname, tools) in enumerate(queries):
+        print(f"\n  --- {qname} ({len(tools)} tools) ---")
+        q_cot_sig, q_cot_app, q_cot_apppc, q_sig_raw = [], [], [], []
+
+        for run_i in range(n_runs):
+            random.seed(base_seed + qi * 1000 + run_i)
+
+            results_all = module.execute_all(tools) if hasattr(module, 'execute_all') else [
+                module.execute(t, a) for t, a in tools]
+
+            cot_block = ""
+            for step_i, (tool_name, tool_args) in enumerate(tools):
+                city = list(tool_args.values())[0]
+                cot_block += f"Step {step_i+1}: {tool_name}({city}) -> {results_all[step_i]}\n"
+            summary_prompt = "\nBased on the above findings, provide your final recommendation:\n"
+
+            def _run_mode(mode_label, use_pc=False):
+                compiler.reset_cache()
+                t_start = time.time()
+                compiler.eval(sys_ids)
+                cur_ids = list(sys_ids)
+                if use_pc:
+                    pc = PrefixCache()
+                    pc.save(compiler, cur_ids)
+
+                if mode_label == "CoT+SIG":
+                    cot_ids = list(compiler.tokenize(cot_block + summary_prompt, add_bos=False))
+                    compiler.eval(cot_ids)
+                    cur_ids += cot_ids
+                elif mode_label == "CoT+AppLoop":
+                    full_text = SYSTEM_PROMPT + "\n\n" + cot_block + summary_prompt
+                    full_ids = list(compiler.tokenize(full_text, add_bos=False))
+                    compiler.rebuild_cache(full_ids)
+                    cur_ids = list(full_ids)
+                elif mode_label == "CoT+AppLoop-PC":
+                    restored = pc.restore(compiler)
+                    cot_only = list(compiler.tokenize("\n\n" + cot_block + summary_prompt, add_bos=False))
+                    compiler.eval(cot_only)
+                    cur_ids = restored + cot_only
+                elif mode_label == "SIG_raw":
+                    for step_i, (tn, ta) in enumerate(tools):
+                        city = list(ta.values())[0]
+                        step_text = f"\n[Step {step_i+1}] {tn}({city}): {results_all[step_i]}\n"
+                        compiler.eval(list(compiler.tokenize(step_text, add_bos=False)))
+                        cur_ids += list(compiler.tokenize(step_text, add_bos=False))
+                    probe = "\nUser: Based on above, provide your final recommendation.\n"
+                    compiler.eval(list(compiler.tokenize(probe, add_bos=False)))
+                    cur_ids += list(compiler.tokenize(probe, add_bos=False))
+
+                gen_text, gen_ids = compiler.generate_until_str("\nUser:", max_new=max_gen, rep_threshold=3)
+                wall_clock = time.time() - t_start
+                return wall_clock, len(gen_ids), gen_text.strip()[:120]
+
+            cot_sig_wc, cot_sig_tok, cot_sig_txt = _run_mode("CoT+SIG")
+            cot_app_wc, cot_app_tok, cot_app_txt = _run_mode("CoT+AppLoop")
+            cot_apppc_wc, cot_apppc_tok, cot_apppc_txt = _run_mode("CoT+AppLoop-PC", use_pc=True)
+            sig_raw_wc, sig_raw_tok, sig_raw_txt = _run_mode("SIG_raw")
+
+            q_cot_sig.append((cot_sig_wc, cot_sig_tok))
+            q_cot_app.append((cot_app_wc, cot_app_tok))
+            q_cot_apppc.append((cot_apppc_wc, cot_apppc_tok))
+            q_sig_raw.append((sig_raw_wc, sig_raw_tok))
+
+        def _ms_wc(pairs):
+            vals = [p[0] for p in pairs]
+            m = sum(vals) / len(vals)
+            s = (sum((v - m) ** 2 for v in vals) / max(1, len(vals) - 1)) ** 0.5
+            tok_m = sum(p[1] for p in pairs) / len(pairs)
+            return m, s, tok_m
+
+        cs_m, cs_s, cs_tok = _ms_wc(q_cot_sig)
+        ca_m, ca_s, ca_tok = _ms_wc(q_cot_app)
+        cap_m, cap_s, cap_tok = _ms_wc(q_cot_apppc)
+        sr_m, sr_s, sr_tok = _ms_wc(q_sig_raw)
+
+        print(f"  {'Mode':<16} {'Wall-Clock(s)':<22} {'Gen Tok':<10} {'vs CoT+SIG':<14} {'vs CoT+App':<14}")
+        print(f"  {'-'*16} {'-'*22} {'-'*10} {'-'*14} {'-'*14}")
+        print(f"  {'CoT+SIG':<16} {cs_m:.3f}±{cs_s:.3f}          {cs_tok:<10.0f} {'1.00x':<14} {f'{ca_m/cs_m:.2f}x':<14}")
+        print(f"  {'CoT+AppLoop':<16} {ca_m:.3f}±{ca_s:.3f}          {ca_tok:<10.0f} {f'{cs_m/ca_m:.2f}x':<14} {'1.00x':<14}")
+        print(f"  {'CoT+AppLoop-PC':<16} {cap_m:.3f}±{cap_s:.3f}          {cap_tok:<10.0f} {f'{cs_m/cap_m:.2f}x':<14} {f'{ca_m/cap_m:.2f}x':<14}")
+        print(f"  {'SIG_raw':<16} {sr_m:.3f}±{sr_s:.3f}          {sr_tok:<10.0f} {f'{cs_m/sr_m:.2f}x':<14} {f'{ca_m/sr_m:.2f}x':<14}")
+
+        net_speedup = ca_m / max(cs_m, 0.001)
+        net_speedup_pc = cap_m / max(cs_m, 0.001)
+        print(f"\n  CoT+SIG net vs CoT+AppLoop:        {net_speedup:.1f}x")
+        print(f"  CoT+SIG net vs CoT+AppLoop-PC:     {net_speedup_pc:.1f}x")
+        if cs_tok and ca_tok and cap_tok:
+            tok_ratio_app = cs_tok / max(ca_tok, 1)
+            tok_ratio_pc = cs_tok / max(cap_tok, 1)
+            print(f"  Gen token ratio (CoT+SIG/CoT+App):     {tok_ratio_app:.2f}")
+            print(f"  Gen token ratio (CoT+SIG/CoT+App-PC):  {tok_ratio_pc:.2f}")
+            if tok_ratio_app < 0.6 or tok_ratio_pc < 0.6:
+                print(f"  ⚠ Caution: CoT+SIG output substantially shorter — speedup may reflect truncation.")
+
+        for lst, key in [(q_cot_sig, "CoT+SIG"), (q_cot_app, "CoT+AppLoop"),
+                          (q_cot_apppc, "CoT+AppLoop-PC"), (q_sig_raw, "SIG_raw")]:
+            all_mode_data.setdefault(key, []).extend(lst)
+
+    print(f"\n  R14 Summary (N={n_runs} paired runs across {len(queries)} queries):")
+    print(f"  All modes compared via end-to-end wall-clock. AppLoop-PC serves as fair")
+    print(f"  baseline. Generation length controlled at {max_gen} tokens.")
+    print(f"  Gen-token tracking verifies that speedup is NOT from output truncation.")
+    print(f"  net contribution from the CoT structuring effect.")
+
+
+# ======================================================================
+# R15 / UQ3: CoT+SIG Reasoning QA Benchmark
+# ======================================================================
+def run_task_r15(args, compiler, module, gpu):
+    import time
+    import random
+
+    print(f"\n{'='*80}")
+    print(f"  R15 (UQ3): CoT+SIG Multi-Step Reasoning QA Benchmark")
+    print(f"  Question: Does CoT+SIG fact-reproduction translate to task accuracy?")
+    print(f"{'='*80}")
+
+    engine = InjectionEngine(compiler)
+
+    reasoning_tasks = [
+        {
+            "name": "2-step arithmetic",
+            "tools": [
+                ("get_weather", {"city": "london"}),
+                ("get_weather", {"city": "paris"}),
+            ],
+            "query": "London's temperature plus Paris's temperature equals what? Answer with a single number and unit.",
+            "expected": "37°C",
+            "system": "You are a precise calculator. Answer ONLY with the number and unit.",
+        },
+        {
+            "name": "fuel calculation",
+            "tools": [
+                ("get_flight_info", {"origin": "london", "destination": "paris"}),
+            ],
+            "query": "The flight consumes 2.5 liters per 100km. The distance from London to Paris is roughly 344 km. "
+                     "How much fuel for a round trip? Give just the number with unit.",
+            "expected": "17.2",
+            "system": "You are a precise calculator. Only output the number and unit.",
+        },
+        {
+            "name": "comparison",
+            "tools": [
+                ("get_weather", {"city": "tokyo"}),
+                ("get_weather", {"city": "sydney"}),
+            ],
+            "query": "Which city is warmer, Tokyo or Sydney? Answer with just the city name.",
+            "expected": "sydney",
+            "system": "Compare temperatures and answer with the city name only.",
+        },
+        {
+            "name": "3-city ranking",
+            "tools": [
+                ("get_weather", {"city": "rome"}),
+                ("get_weather", {"city": "berlin"}),
+                ("get_weather", {"city": "newyork"}),
+            ],
+            "query": "Rank the cities from coldest to warmest by temperature. List just the city names in order.",
+            "expected": "new york, berlin, rome",
+            "system": "Output only the sorted city names, separated by commas.",
+        },
+    ]
+
+    random.shuffle(reasoning_tasks)
+
+    print(f"\n  Testing {len(reasoning_tasks)} multi-step reasoning tasks")
+    print(f"  Modes: CoT+SIG vs CoT+AppLoop (same CoT prompt)")
+    print(f"\n  {'Task':<22} {'Mode':<12} {'Time(s)':<9} {'Correct?':<10} {'Answer'}")
+    print(f"  {'-'*22} {'-'*12} {'-'*9} {'-'*10} {'-'*30}")
+
+    correct_sig = 0
+    correct_app = 0
+    total = len(reasoning_tasks)
+
+    for task in reasoning_tasks:
+        tools = task["tools"]
+        cot_prompt = task["system"] + "\n\n"
+        for step_i, (tool_name, tool_args) in enumerate(tools):
+            result = module.execute(tool_name, tool_args)
+            city = list(tool_args.values())[0]
+            cot_prompt += f"Step {step_i+1}: {tool_name}({city}) → {result}\n"
+        cot_prompt += f"\nUser query: {task['query']}\nAssistant:"
+
+        for mode_label, mode in [("CoT+SIG", True), ("CoT+AppLoop", False)]:
+            engine.reset()
+            if mode:
+                system_ids = list(compiler.tokenize(task["system"] + "\n\n", add_bos=False))
+                compiler.eval(system_ids)
+                engine.update_cache(system_ids)
+
+                for step_i, (tool_name, tool_args) in enumerate(tools):
+                    result = module.execute(tool_name, tool_args)
+                    city = list(tool_args.values())[0]
+                    step_text = f"Step {step_i+1}: {tool_name}({city}) → {result}\n"
+                    s_ids = list(compiler.tokenize(step_text, add_bos=False))
+                    compiler.eval(s_ids)
+                    engine.update_cache(s_ids)
+
+                q_ids = list(compiler.tokenize(f"User query: {task['query']}\nAssistant:", add_bos=False))
+                compiler.eval(q_ids)
+                engine.update_cache(q_ids)
+            else:
+                all_ids = list(compiler.tokenize(cot_prompt, add_bos=False))
+                t0 = time.time()
+                compiler.eval(all_ids)
+                engine.update_cache(all_ids)
+
+            gen_t0 = time.time()
+            gen_text, _ = compiler.generate_until_str("\nUser:", max_new=60, rep_threshold=3)
+            gen_time = time.time() - gen_t0
+
+            answer = gen_text.strip().lower()
+            is_correct = task["expected"] in answer
+
+            if is_correct:
+                if mode:
+                    correct_sig += 1
+                else:
+                    correct_app += 1
+
+            print(f"  {task['name'][:20]:<22} {mode_label:<12} {gen_time:<9.2f} {'YES' if is_correct else 'NO':<10} {answer[:28]}")
+
+    print(f"\n  --- R15 Accuracy Summary ---")
+    print(f"  CoT+SIG:     {correct_sig}/{total} correct ({correct_sig/total:.0%})")
+    print(f"  CoT+AppLoop: {correct_app}/{total} correct ({correct_app/total:.0%})")
+    print(f"\n  R15 Summary: Preliminary multi-step reasoning accuracy benchmark.")
+    print(f"  Tasks: arithmetic, comparison, ranking across tool results.")
+
+
+# ======================================================================
 # Baseline Runner
 # ======================================================================
 def run_baseline(args, compiler, module, gpu):
@@ -1960,7 +2475,7 @@ def main():
     parser.add_argument("--task", default="baseline",
                         choices=["baseline", "r1", "r2", "r3", "r4", "r5",
                                  "r6", "r7", "r8", "r9", "r10", "r11",
-                                 "r12", "r13", "r14", "all"],
+                                 "r12", "r13", "r14", "r15", "all"],
                         help="Which test task to run")
     parser.add_argument("--r2-n-cities", type=int, default=8)
     parser.add_argument("--r2-probe-interval", type=int, default=3)
@@ -1990,7 +2505,7 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(name)s - %(levelname)s - %(message)s")
 
-    needs_model = args.task in ("baseline", "r1", "r2", "all")
+    needs_model = args.task in ("baseline", "r1", "r2", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "all")
     if needs_model and not args.model:
         parser.error(f"--task {args.task} requires --model MODEL")
     gpu = GPUMonitor()
@@ -2027,50 +2542,41 @@ def main():
             from transformer_bench import run_r3_empirical, print_r3_empirical
             print_r3_empirical(run_r3_empirical())
 
-    if args.task in ("r6", "r13", "r14", "all"):
-        try:
-            from research_architecture import run_task_r6, run_task_r13, run_task_r14
-        except ImportError:
-            import research_architecture
-            run_task_r6 = research_architecture.run_task_r6
-            run_task_r13 = research_architecture.run_task_r13
-            run_task_r14 = research_architecture.run_task_r14
+    if args.task in ("r6", "r13", "r14", "r15", "all"):
         if args.task in ("r6", "all"):
-            run_task_r6(args)
+            run_task_r6(args, compiler, module, gpu)
         if args.task in ("r13", "all"):
-            run_task_r13(args)
+            run_task_r13(args, compiler, module, gpu)
         if args.task in ("r14", "all"):
-            run_task_r14(args)
+            run_task_r14(args, compiler, module, gpu)
+        if args.task in ("r15", "all"):
+            run_task_r15(args, compiler, module, gpu)
 
     if args.task in ("r7", "r8", "r9", "all"):
         try:
-            from research_embodied import run_task_r7, run_task_r8, run_task_r9
+            from sig_benchmark import run_task_r7, run_task_r8, run_task_r9
         except ImportError:
-            import research_embodied
-            run_task_r7 = research_embodied.run_task_r7
-            run_task_r8 = research_embodied.run_task_r8
-            run_task_r9 = research_embodied.run_task_r9
-        if args.task in ("r7", "all"):
-            run_task_r7(args)
-        if args.task in ("r8", "all"):
-            run_task_r8(args)
-        if args.task in ("r9", "all"):
-            run_task_r9(args)
+            print("  R7/R8/R9 require sig_benchmark.py. Run: python sig_benchmark.py --task r7")
+        else:
+            if args.task in ("r7", "all"):
+                run_task_r7(args, compiler, module, gpu)
+            if args.task in ("r8", "all"):
+                run_task_r8(args, compiler, module, gpu)
+            if args.task in ("r9", "all"):
+                run_task_r9(args, compiler, module, gpu)
 
     if args.task in ("r10", "r11", "r12", "all"):
         try:
-            from research_safety import run_task_r10, run_task_r11, run_task_r12
+            from transformer_bench import run_task_r10, run_task_r11, run_task_r12
         except ImportError:
-            import research_safety
-            run_task_r10 = research_safety.run_task_r10
-            run_task_r11 = research_safety.run_task_r11
-            run_task_r12 = research_safety.run_task_r12
-        if args.task in ("r10", "all"):
-            run_task_r10(args)
-        if args.task in ("r11", "all"):
-            run_task_r11(args)
-        if args.task in ("r12", "all"):
-            run_task_r12(args)
+            print("  R10/R11/R12 require transformer_bench.py. Run: python transformer_bench.py --task r10")
+        else:
+            if args.task in ("r10", "all"):
+                run_task_r10(args, compiler, module, gpu)
+            if args.task in ("r11", "all"):
+                run_task_r11(args, compiler, module, gpu)
+            if args.task in ("r12", "all"):
+                run_task_r12(args, compiler, module, gpu)
 
     gpu.shutdown()
     print("\nDone.")

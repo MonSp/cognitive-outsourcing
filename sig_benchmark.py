@@ -980,6 +980,339 @@ def run_task_r1_attention(args):
     run_r1_attention(args.r1_model_id if hasattr(args, 'r1_model_id') else "Qwen/Qwen2.5-0.5B")
 
 
+# ================================================================
+# R7: Multimodal SIG — Structured Data Injection Efficiency
+# ================================================================
+def run_task_r7(args, compiler=None, module=None, gpu=None):
+    import json
+    import time
+
+    print(f"\n{'='*70}")
+    print(f"  R7: Multimodal SIG — Structured Data Injection Efficiency")
+    print(f"{'='*70}")
+
+    if compiler is None:
+        if not LLAMA_AVAILABLE or not getattr(args, 'model', ''):
+            print("\n  R7 requires --model (GGUF). Skipping.")
+            return
+        compiler = MeaningCompiler(
+            model_path=args.model, n_ctx=getattr(args, 'n_ctx', 16384),
+            n_threads=getattr(args, 'n_threads', 4),
+            n_gpu_layers=getattr(args, 'n_gpu_layers', 0),
+        )
+    if module is None:
+        module = ToolRegistry()
+
+    engine = InjectionEngine(compiler)
+    kv_dim = getattr(args, 'r7_kv_dim', 4096)
+
+    weather_raw = module.execute("get_weather", {"city": "paris"})
+    attractions_raw = module.execute("search_attractions", {"city": "paris"})
+    flight_raw = module.execute("get_flight_info", {"origin": "newyork", "destination": "paris"})
+
+    weather_json = json.dumps({"city": "Paris", "weather": weather_raw}, ensure_ascii=False)
+    attractions_json = json.dumps({"city": "Paris", "attractions": attractions_raw}, ensure_ascii=False)
+    flight_json = json.dumps({"route": "NYC→CDG", "flight_info": flight_raw}, ensure_ascii=False)
+
+    structured_block = f"\n[VISUAL_INPUT]\n{weather_json}\n{attractions_json}\n{flight_json}\n[/VISUAL_INPUT]\n"
+    text_block = f"\nWeather in Paris: {weather_raw}\nAttractions in Paris: {attractions_raw}\nFlights NYC to Paris: {flight_raw}\n"
+    minimal_block = f"\nParis: {weather_raw} | Attractions: {attractions_raw} | Flights: {flight_raw}\n"
+
+    modalities = [
+        ("Structured JSON", structured_block, "Simulates vision→text projection"),
+        ("Plain text", text_block, "Standard text description"),
+        ("Minimal text", minimal_block, "Compressed key-info format"),
+    ]
+
+    print(f"\n  KV dim: {kv_dim}, comparing 3 data representation modes")
+    print(f"\n  {'Mode':<16} {'Tokens':<9} {'Eval(ms)':<10} {'Density(tok/char)':<18} {'Cache Size':<11}")
+    print(f"  {'-'*16} {'-'*9} {'-'*10} {'-'*18} {'-'*11}")
+
+    results = {}
+    for mode_label, block_text, desc in modalities:
+        engine.reset()
+        sys_ids = list(compiler.tokenize(f"{SYSTEM_PROMPT}\n\n", add_bos=False))
+        compiler.eval(sys_ids)
+        engine.update_cache(sys_ids)
+
+        block_ids = list(compiler.tokenize(block_text, add_bos=False))
+        t0 = time.time()
+        compiler.eval(block_ids)
+        eval_ms = (time.time() - t0) * 1000
+        engine.update_cache(block_ids)
+
+        query_text = "User: Based on the information above, recommend whether to visit Paris and why.\nAssistant:"
+        q_ids = list(compiler.tokenize(query_text, add_bos=False))
+        t0 = time.time()
+        compiler.eval(q_ids)
+        eval_ms += (time.time() - t0) * 1000
+        engine.update_cache(q_ids)
+
+        gen_t0 = time.time()
+        gen_text, gen_ids = compiler.generate_until_str("\nUser:", max_new=200, rep_threshold=3)
+        gen_ms = (time.time() - gen_t0) * 1000
+        engine.update_cache(list(gen_ids))
+
+        info_chars = len(block_text.strip())
+        info_token_ratio = len(block_ids) / max(info_chars, 1)
+
+        print(f"  {mode_label:<16} {len(block_ids):<9} {eval_ms:<10.1f} {info_token_ratio:<18.3f} {engine.cache_size:<11}")
+
+        results[mode_label] = {
+            "tokens": len(block_ids),
+            "eval_ms": eval_ms,
+            "gen_ms": gen_ms,
+            "density": info_token_ratio,
+            "answer": gen_text.strip()[:150],
+            "cache_size": engine.cache_size,
+        }
+
+    if results:
+        structured_tok = results["Structured JSON"]["tokens"]
+        plain_tok = results["Plain text"]["tokens"]
+        if plain_tok > 0:
+            overhead_pct = ((structured_tok - plain_tok) / plain_tok) * 100
+            print(f"\n  Structured JSON: {overhead_pct:+.0f}% tokens vs plain text (N=1, single format instance)")
+        if results["Structured JSON"]["eval_ms"] < results["Plain text"]["eval_ms"]:
+            print(f"  ⚠ JSON eval {results['Structured JSON']['eval_ms']:.1f}ms < Plain {results['Plain text']['eval_ms']:.1f}ms despite higher token count.")
+            print(f"  This anomaly is a SPECULATIVE observation — NOT validated with hardware")
+            print(f"  performance counters (nsight systems / ncu).  Possible CUDA kernel batching")
+            print(f"  artifact.  Requires SM occupancy profiling (gpu.utilization_snapshot())")
+            print(f"  to distinguish compute-bound batching from memory-bandwidth fragmentation.")
+        print(f"\n  R7 Summary (N=1 per format): Token-efficiency directive — plain/minimal text preferred.")
+        print(f"  JSON eval anomaly is an unverified hypothesis. GPU profiling required for confirmation.")
+
+
+# ================================================================
+# R8: Spatial Cognition — Long-Horizon Spatial Memory Benchmark
+# ================================================================
+def run_task_r8(args, compiler=None, module=None, gpu=None):
+    import time
+    import random
+    from core.compiler import PrefixCache
+
+    runs = max(1, getattr(args, 'r8_runs', 30))
+    base_seed = 42
+
+    print(f"\n{'='*70}")
+    print(f"  R8: Long-Context Precise Retrieval + Spatial Reasoning Probe")
+    print(f"  N={runs} paired runs, 3 modes: SIG / AppLoop / AppLoop-PC")
+    print(f"{'='*70}")
+
+    if compiler is None:
+        if not LLAMA_AVAILABLE or not getattr(args, 'model', ''):
+            print("\n  R8 requires --model (GGUF). Skipping.")
+            return
+        compiler = MeaningCompiler(
+            model_path=args.model, n_ctx=getattr(args, 'n_ctx', 16384),
+            n_threads=getattr(args, 'n_threads', 4),
+            n_gpu_layers=getattr(args, 'n_gpu_layers', 0),
+        )
+    if module is None:
+        module = ToolRegistry()
+
+    cities = ["paris", "london", "rome", "berlin", "tokyo", "sydney", "dubai", "newyork"]
+    n_rooms = 6
+    n_turns = n_rooms * 2
+
+    locations = {}
+    for i in range(n_rooms):
+        locations[f"room_{i}"] = cities[i % len(cities)]
+
+    sys_ids = list(compiler.tokenize(f"{SYSTEM_PROMPT}\n\n", add_bos=False))
+
+    retrieval_turns = {3, 6, 9, 12}
+    spatial_turn = 10
+
+    sig_ret_hits = {p: 0 for p in retrieval_turns}
+    app_ret_hits = {p: 0 for p in retrieval_turns}
+    apppc_ret_hits = {p: 0 for p in retrieval_turns}
+    sig_spatial_hits = 0
+    app_spatial_hits = 0
+    apppc_spatial_hits = 0
+
+    for run_i in range(runs):
+        random.seed(base_seed + run_i)
+
+        def _run_one(mode_label, use_pc=False):
+            compiler.reset_cache()
+            current_cache_ids = []
+            compiler.eval(sys_ids)
+            current_cache_ids = list(sys_ids)
+            if use_pc:
+                pc = PrefixCache()
+                pc.save(compiler, current_cache_ids)
+
+            accumulated = []
+            ret_hits = {p: 0 for p in retrieval_turns}
+            spa_hit = 0
+
+            for turn_i in range(n_turns):
+                room_i = turn_i % n_rooms
+                city = locations[f"room_{room_i}"]
+                tool_name = "get_weather" if turn_i < n_rooms else "search_attractions"
+                result = module.execute(tool_name, {"city": city})
+                tool_text = f"\n[Room {room_i}][Turn {turn_i+1}] {tool_name}({city}): {result}\n"
+                accumulated.append(tool_text)
+                context = "\n".join(p.strip() for p in accumulated if p.strip())
+
+                extra_text = ""
+                if turn_i in retrieval_turns:
+                    probe_city = locations["room_0"]
+                    extra_text = f"\n[Retrieval Probe] What was the weather in {probe_city.title()} (Room 0)? Answer briefly.\n"
+                elif turn_i == spatial_turn:
+                    extra_text = (f"\n[Spatial Reasoning Probe] Room order: Room0({locations['room_0'].title()}), "
+                                 f"Room1({locations['room_1'].title()}), Room2({locations['room_2'].title()}). "
+                                 f"From Room0's door, which city is 2 rooms ahead? Answer briefly.\n")
+
+                full_turn_text = tool_text + extra_text
+
+                if mode_label == "SIG":
+                    compiler.eval(list(compiler.tokenize(full_turn_text, add_bos=False)))
+                    current_cache_ids += list(compiler.tokenize(full_turn_text, add_bos=False))
+                elif mode_label == "AppLoop":
+                    full_text = SYSTEM_PROMPT + "\n\n" + context + extra_text
+                    compiler.rebuild_cache(list(compiler.tokenize(full_text, add_bos=False)))
+                    current_cache_ids = list(compiler.tokenize(full_text, add_bos=False))
+                elif mode_label == "AppLoop-PC":
+                    restored = pc.restore(compiler)
+                    ctx_ids = list(compiler.tokenize("\n\n" + context + extra_text, add_bos=False))
+                    compiler.eval(ctx_ids)
+                    current_cache_ids = restored + ctx_ids
+
+                if extra_text:
+                    gen_text, gen_ids = compiler.generate_until_str("\nUser:", max_new=80, rep_threshold=3)
+                    current_cache_ids += list(gen_ids)
+                    if turn_i in retrieval_turns:
+                        probe_city = locations["room_0"]
+                        if probe_city.lower() in gen_text.lower() or "room 0" in gen_text.lower():
+                            ret_hits[turn_i] = 1
+                    elif turn_i == spatial_turn:
+                        correct_city = locations["room_2"]
+                        if correct_city.lower() in gen_text.lower():
+                            spa_hit = 1
+
+            return ret_hits, spa_hit
+
+        sig_r, sig_s = _run_one("SIG")
+        app_r, app_s = _run_one("AppLoop")
+        apppc_r, apppc_s = _run_one("AppLoop-PC", use_pc=True)
+
+        for p in retrieval_turns:
+            sig_ret_hits[p] += sig_r[p]
+            app_ret_hits[p] += app_r[p]
+            apppc_ret_hits[p] += apppc_r[p]
+        sig_spatial_hits += sig_s
+        app_spatial_hits += app_s
+        apppc_spatial_hits += apppc_s
+
+    probe_order = sorted(retrieval_turns)
+    print(f"\n  --- Long-Context Precise Retrieval ---")
+    print(f"  {'Probe':<10} {'SIG HIT/N':<12} {'AppLoop HIT/N':<14} {'AppLoop-PC HIT/N':<16}")
+    print(f"  {'-'*10} {'-'*12} {'-'*14} {'-'*16}")
+    for p in probe_order:
+        print(f"  T={p:<8} {sig_ret_hits[p]:<3}/{runs:<8} {app_ret_hits[p]:<3}/{runs:<8} {apppc_ret_hits[p]:<3}/{runs:<8}")
+
+    sig_ret_total = sum(sig_ret_hits.values())
+    app_ret_total = sum(app_ret_hits.values())
+    apppc_ret_total = sum(apppc_ret_hits.values())
+    total_probes = len(retrieval_turns) * runs
+
+    print(f"\n  --- Spatial Reasoning Probe (T={spatial_turn}) ---")
+    print(f"  SIG:       {sig_spatial_hits}/{runs} ({sig_spatial_hits/runs:.1%})")
+    print(f"  AppLoop:   {app_spatial_hits}/{runs} ({app_spatial_hits/runs:.1%})")
+    print(f"  AppLoop-PC:{apppc_spatial_hits}/{runs} ({apppc_spatial_hits/runs:.1%})")
+
+    print(f"\n  R8 Summary (N={runs} paired runs, {n_turns} turns):")
+    print(f"  Retrieval: SIG {sig_ret_total}/{total_probes} | AppLoop {app_ret_total}/{total_probes} | AppLoop-PC {apppc_ret_total}/{total_probes}")
+    print(f"  Spatial reasoning probe tests true multi-step inference, not just key-value recall.")
+    print(f"  NOTE: Previously mislabeled as 'spatial cognition' — corrected to")
+    print(f"  'long-context precise retrieval' with a separate spatial reasoning component.")
+
+
+# ================================================================
+# R9: Real-Time SIG — Latency Budget Allocation Optimization
+# ================================================================
+def run_task_r9(args, compiler=None, module=None, gpu=None):
+    import time
+    import math
+
+    print(f"\n{'='*70}")
+    print(f"  R9: Real-Time Constrained SIG — Latency Budget Analysis")
+    print(f"{'='*70}")
+
+    if compiler is None:
+        if not LLAMA_AVAILABLE or not getattr(args, 'model', ''):
+            print("\n  R9 requires --model (GGUF). Skipping.")
+            return
+        compiler = MeaningCompiler(
+            model_path=args.model, n_ctx=getattr(args, 'n_ctx', 16384),
+            n_threads=getattr(args, 'n_threads', 4),
+            n_gpu_layers=getattr(args, 'n_gpu_layers', 0),
+        )
+    if module is None:
+        module = ToolRegistry()
+
+    latency_budget = getattr(args, 'r9_latency_budget', 2.0)
+    engine = InjectionEngine(compiler)
+
+    print(f"\n  Latency budget: {latency_budget}s total per interaction")
+    print(f"  Measuring prefill + generation time for different strategies")
+
+    engine.reset()
+    sys_ids = list(compiler.tokenize(f"{SYSTEM_PROMPT}\n\n", add_bos=False))
+    compiler.eval(sys_ids)
+    engine.update_cache(sys_ids)
+
+    configs = []
+    for context_tokens in [200, 500, 1000, 2000]:
+        context_text = f"User: {('Paris is a beautiful city. ' * (context_tokens // 5))}\nAssistant:"
+        ctx_ids = list(compiler.tokenize(context_text, add_bos=False))[:context_tokens]
+
+        t0 = time.time()
+        compiler.eval(ctx_ids)
+        prefill_time = time.time() - t0
+
+        gen_t0 = time.time()
+        gen_text, gen_ids = compiler.generate_until_str("\nUser:", max_new=100, rep_threshold=3)
+        gen_time = time.time() - gen_t0
+
+        total_time = prefill_time + gen_time
+
+        configs.append({
+            "ctx_tokens": len(ctx_ids),
+            "prefill_time": prefill_time,
+            "gen_time": gen_time,
+            "total_time": total_time,
+        })
+
+    print(f"\n  {'Context Tok':<13} {'Prefill(s)':<11} {'Gen(s)':<9} {'Total(s)':<10} {'Budget':<9} {'Strategy'}")
+    print(f"  {'-'*13} {'-'*11} {'-'*9} {'-'*10} {'-'*9} {'-'*25}")
+
+    for c in configs:
+        within_budget = "OK" if c["total_time"] <= latency_budget else "OVER"
+        if c["total_time"] <= latency_budget * 0.5:
+            strategy = "Use teacher planning (safe)"
+        elif c["total_time"] <= latency_budget * 0.8:
+            strategy = "SIG with 1-step prefetch"
+        elif c["total_time"] <= latency_budget:
+            strategy = "SIG only, no teacher"
+        else:
+            strategy = "AppLoop: too slow, need SIG"
+        print(f"  {c['ctx_tokens']:<13} {c['prefill_time']:<11.3f} {c['gen_time']:<9.3f} {c['total_time']:<10.3f} {within_budget:<9} {strategy:<25}")
+
+    if len(configs) >= 2:
+        t0 = configs[0]["prefill_time"]
+        t1 = configs[-1]["prefill_time"]
+        if t0 > 0:
+            print(f"\n  Prefill scaling: {t1/t0:.1f}x for {configs[-1]['ctx_tokens']/configs[0]['ctx_tokens']:.0f}x tokens")
+        print(f"  SIG advantage: avoids re-prefilling, amortizes cost across turns")
+
+    print(f"\n  R9 Summary: Real-time SIG analysis identifies the optimal strategy")
+    print(f"  based on available latency budget and context size.")
+    print(f"  Predictive injection and speculative decoding can further reduce latency.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Enhanced SIG Benchmark — 9 Scenarios + R3")
     parser.add_argument("--model", default="",
@@ -993,7 +1326,7 @@ def main():
     parser.add_argument("--runs", type=int, default=10, help="Number of runs per mode per scenario (default: 10)")
     parser.add_argument("--skip", type=str, default="", help="Comma-separated scenario numbers to skip (e.g. '3,5')")
     parser.add_argument("--task", default="baseline",
-                        choices=["baseline", "r1", "r3", "all"],
+                        choices=["baseline", "r1", "r3", "r7", "r8", "r9", "all"],
                         help="Which test task to run")
     parser.add_argument("--r1-model-id", default="Qwen/Qwen2.5-0.5B",
                         help="ModelScope model ID for R1 attention analysis")
@@ -1375,6 +1708,30 @@ def main():
             gpu.shutdown()
             return
         run_task_r3(args, gpu)
+
+    if args.task in ("r7", "all"):
+        if not args.model:
+            print("ERROR: --model required for R7 (skipping in --task all)")
+        elif not LLAMA_AVAILABLE:
+            print("ERROR: llama-cpp-python required for R7")
+        else:
+            run_task_r7(args)
+
+    if args.task in ("r8", "all"):
+        if not args.model:
+            print("ERROR: --model required for R8 (skipping in --task all)")
+        elif not LLAMA_AVAILABLE:
+            print("ERROR: llama-cpp-python required for R8")
+        else:
+            run_task_r8(args)
+
+    if args.task in ("r9", "all"):
+        if not args.model:
+            print("ERROR: --model required for R9 (skipping in --task all)")
+        elif not LLAMA_AVAILABLE:
+            print("ERROR: llama-cpp-python required for R9")
+        else:
+            run_task_r9(args)
 
     gpu.shutdown()
     print("\nBenchmark complete.")

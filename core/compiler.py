@@ -86,6 +86,14 @@ class MeaningCompiler:
     def kv_cache_seq_keep(self, seq_id: int):
         self.llm._ctx.kv_cache_seq_keep(seq_id)
 
+    def set_n_tokens(self, n: int):
+        """Set logical token position counter — required after kv_cache_seq_cp."""
+        self.llm.n_tokens = n
+
+    def clear_seq(self, seq_id: int):
+        """Remove all KV cache entries for a specific sequence."""
+        self.llm._ctx.kv_cache_seq_rm(seq_id, -1, -1)
+
     def _ids_endswith(self, seq: List[int], suffix: List[int]) -> bool:
         if len(suffix) > len(seq):
             return False
@@ -184,3 +192,47 @@ class MeaningCompiler:
             return gen_text, gen_ids, False
         self.rebuild_cache(cached_prefix_ids)
         return "", [], True
+
+
+class PrefixCache:
+    """KV-cache prefix reuse via sequence copying — AppLoop-PC baseline.
+
+    Saves the KV cache of a shared prefix (e.g., system prompt + static tool
+    descriptions) to a separate sequence, then restores it on subsequent turns
+    to avoid re-prefilling the common prefix.  This approximates the behaviour
+    of production prefix-caching systems (PagedAttention, RadixAttention)
+    without requiring a full serving stack.
+
+    Usage::
+
+        pc = PrefixCache()
+        # After initial prefill of the shared prefix ...
+        pc.save(compiler)
+        # Later, for each turn:
+        pc.restore(compiler)
+        compiler.eval(turn_specific_tokens)
+        ...
+    """
+
+    PREFIX_SEQ = 1
+
+    def __init__(self):
+        self.prefix_len = 0
+        self.saved_token_ids: List[int] = []
+
+    def save(self, compiler: MeaningCompiler, token_ids: List[int]):
+        """Persist the current KV cache as a reusable prefix."""
+        self.prefix_len = compiler.n_tokens
+        self.saved_token_ids = list(token_ids)
+        compiler.clear_seq(self.PREFIX_SEQ)
+        compiler.kv_cache_seq_cp(SEQ_ID, self.PREFIX_SEQ, 0, self.prefix_len)
+
+    def restore(self, compiler: MeaningCompiler) -> List[int]:
+        """Clear the current cache and restore the saved prefix.
+
+        Returns the restored token IDs so callers can track context state.
+        """
+        compiler.reset_cache()
+        compiler.kv_cache_seq_cp(self.PREFIX_SEQ, SEQ_ID, 0, self.prefix_len)
+        compiler.set_n_tokens(self.prefix_len)
+        return list(self.saved_token_ids)
