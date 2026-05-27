@@ -266,3 +266,45 @@ class ToolRegistry:
             key = args.get("test_name", args.get("name", "")).strip()
             return self.tools["run_test"].get(key, f"Test not found: {key}")
         return f"Unknown tool: {name}"
+
+
+class LatencyToolWrapper:
+    """Wraps any tool executor with a configurable per-call delay.
+
+    Simulates realistic network/processing latency for tool execution.
+    Used for latency ablation experiments to determine how SIG advantage
+    changes under real-world conditions.
+
+    NOTE: Uses ``time.sleep()`` which blocks the calling thread and does
+    not release the GIL — this approximates synchronous I/O latency but
+    does not simulate the GIL-release behaviour of real network I/O or
+    the jitter characteristic of cloud API calls.
+
+    Usage::
+
+        tools = ToolRegistry()
+        delayed_tools = LatencyToolWrapper(tools, delay_ms=300)
+        result = delayed_tools.execute("get_weather", {"city": "paris"})
+    """
+
+    def __init__(self, inner, delay_ms: float = 0.0):
+        self._inner = inner
+        self.delay_ms = delay_ms
+        self._call_count = 0
+        self._total_delay_s = 0.0
+
+    def execute(self, name: str, args: dict) -> str:
+        if self.delay_ms > 0:
+            import time
+            time.sleep(self.delay_ms / 1000.0)
+            self._call_count += 1
+            self._total_delay_s += self.delay_ms / 1000.0
+        return self._inner.execute(name, args)
+
+    @property
+    def call_count(self) -> int:
+        return self._call_count
+
+    @property
+    def total_delay_s(self) -> float:
+        return self._total_delay_s

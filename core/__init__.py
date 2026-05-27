@@ -29,7 +29,7 @@ from .prompts import (
     LOCAL_CO_PROMPT,
     NODE_PATTERN,
 )
-from .metrics import init_metrics, extract_key_facts, evaluate_answer_quality, average_metrics
+from .metrics import init_metrics, extract_key_facts, evaluate_answer_quality, average_metrics, compute_metrics_table, recall_continuity_score, token_rank_metric, mean_std
 from .info_theory import (
     kl_divergence,
     js_divergence,
@@ -40,4 +40,12 @@ from .info_theory import (
     cosine_similarity,
     head_agreement_rate,
     compute_layer_shifts,
+)
+from .quality import (
+    KitchenQualityEvaluator,
+    TravelQualityEvaluator,
+    DevQualityEvaluator,
+    SemanticScorer,
+    build_kitchen_ground_truth,
+    build_travel_ground_truth,
 )

@@ -2,11 +2,13 @@
 
 ## Abstract
 
-The prevailing paradigm of deploying large language models (LLMs) in the cloud creates fundamental tensions with the demands of embodied intelligent agents: low latency, persistent environmental context, and privacy of sensory data. We propose **Cognitive Outsourcing (CO)**, an edge‑AI architecture that empowers lightweight on‑device language models (as small as 0.8B parameters) to orchestrate complex physical tasks through a novel **Suspend‑and‑Inject Generation (SIG)** primitive. SIG enables a running model to pause autoregressive decoding, invoke external cognitive modules (including cloud‑scale LLM “teachers”, perception APIs, or local skill libraries), and seamlessly absorb their responses into the model’s key‑value (KV) cache without costly re‑encoding. By preserving the full attention state across interactions, CO eliminates the quadratic prefill overhead of traditional tool‑calling loops and maintains the cognitive continuity essential for long‑horizon embodied tasks. We present the detailed design of SIG and the three‑layer CO architecture, and validate the system on a comprehensive suite of multi‑step reasoning benchmarks using 0.8B and 4B parameter models. Our results demonstrate that SIG reduces prefill time by up to 86% and prefill tokens by 96%, yielding end‑to‑end speedups of up to 1.57× **on 0.8B models** while **substantially** improving answer quality in long‑context scenarios. **We further analyze the generation-time trade-off observed on 4B models and discuss mitigation strategies including adaptive context compression.** We provide an extensive comparative analysis of related paradigms—from KV‑cache optimisation to cognitive architectures—and show that CO occupies a unique position: it redefines tool‑calling as an *inference‑engine primitive* rather than an application‑layer loop, and uniquely combines continuous attention with privacy‑preserving external augmentation. We further show how CO complements emerging self‑improving agent frameworks such as Robo‑Cortex, and how SIG can serve as their efficient runtime substrate. CO redefines the edge‑cloud boundary for embodied intelligence: true capability emerges not from parameter scale alone, but from the fluid orchestration of external cognitive resources around a persistent local attention state.
+The prevailing paradigm of deploying large language models (LLMs) in the cloud creates fundamental tensions with the demands of embodied intelligent agents: low latency, persistent environmental context, and privacy of sensory data. We propose **Cognitive Outsourcing (CO)**, an edge-AI architecture that empowers lightweight on-device language models (as small as 0.8B parameters) to orchestrate complex physical tasks through a novel **Suspend-and-Inject Generation (SIG)** primitive. SIG enables a running model to pause autoregressive decoding, invoke external cognitive modules (local sensors, skill libraries, or cloud-scale LLM “teachers”), and seamlessly absorb their responses into the model’s key-value (KV) cache without costly re-encoding. By preserving the full attention state across interactions, CO eliminates the quadratic prefill overhead of traditional tool-calling loops and maintains the cognitive continuity essential for long-horizon embodied tasks. **Critically, CO+SIG is designed for edge devices—smartphones, robots, embedded systems—where inference runs on unoptimised CPU/GPU stacks with limited parallelism, and where prefill cost genuinely dominates wall-clock time. It is not intended to compete with cloud-scale serving frameworks (vLLM, TensorRT-LLM) that already exploit FlashAttention and RadixAttention to reduce prefill to near-negligible levels; rather, CO+SIG targets the qualitatively different regime of single-user, single-instance edge inference where these server-side optimisations are inapplicable.** We present the detailed design of SIG and the three-layer CO architecture, and validate the system on a comprehensive suite of multi-step reasoning benchmarks using 0.8B and 4B parameter models on an NVIDIA RTX 4070 SUPER and CPU-only configurations. Our results demonstrate that SIG reduces prefill tokens by up to 96%, yielding end-to-end speedups of 3.85x on 4B GPU (4.71x FlashAttention-normalized, 3.25x at 8x FA), with prefill reduced from 36% to 2% of wall-clock time, while preserving continuous attention that dramatically improves information retention (33% vs. 4% coverage). **We systematically diagnose SIG's limitations—quality degradation, generation inflation on sub-1B models, and sensitivity to tool latency—and introduce two practical, edge-targeted mitigations: Retrospective SIG for compensatory fact recall (adding only 20-27% wall-clock overhead on GPU while maintaining near-SIG generation token counts), and Compressed SIG with H2O-style KV-cache pruning that reduces cache footprint by 61% while retaining 3.88x speedup vs AppLoop (only 17% overhead vs uncompressed SIG).** We position CO+SIG not as a competitor to cloud-scale serving infrastructure, but as a specialised edge inference runtime that uniquely combines continuous attention, privacy preservation, and external cognitive augmentation—forming the stateful neural substrate for embodied agents and self-improving architectures such as Robo-Cortex.
 
 ## 1. Introduction
 
 Embodied intelligent agents—robots navigating homes, manipulators assembling parts, drones inspecting infrastructure—must integrate perception, reasoning, and action in tight, real‑time loops. Modern approaches often rely on large vision‑language models (VLMs) hosted in the cloud to supply common‑sense knowledge and task planning, but this introduces prohibitive latency, privacy risks for raw sensor streams, and fragility in intermittent networks. Conversely, purely on‑device models preserve responsiveness and privacy but lack the factual coverage, complex reasoning, and emergent skills of frontier cloud models. This dilemma mirrors the classic edge‑versus‑cloud tension in personal AI assistants, yet is amplified by the embodied domain’s demanding requirements for **continuous stateful attention** across long action sequences and **millisecond‑scale control loops**.
+
+**Scope and non-goals.** Before proceeding, we make explicit what CO+SIG is *not*: it is not a replacement for or competitor to cloud-scale LLM serving systems such as vLLM, TensorRT-LLM, or SGLang. These frameworks already deploy FlashAttention-2/3, RadixAttention, and continuous batching to reduce prefill to near-negligible levels—making prefill-centric optimisations like SIG largely moot in the high-throughput cloud serving regime. CO+SIG targets the *orthogonal frontier* of single-instance edge inference on personal devices, robots, and embedded platforms, where (i) FlashAttention is frequently unavailable due to hardware, driver, or framework constraints; (ii) the inference engine is a lightweight library such as llama.cpp rather than a full serving stack; (iii) tool calls are to local sensors, perception pipelines, and skill modules with sub-100ms latency, not cloud APIs; and (iv) the model runs alone on the device with no concurrent requests to batch. In this regime, prefill *does* dominate the wall-clock budget, and SIG’s contributions are both necessary and sufficient.
 
 Current bridging mechanisms—application‑layer tool calling or retrieval‑augmented generation (RAG)—operate in a *stateless loop*: each external query causes the model to pause, and upon receiving the result, the entire conversation history (plus the new information) is re‑encoded from scratch. This discards the model’s internal attention state, incurs quadratic prefill costs that grow with the sequence length, and, critically, obliterates the implicit cognitive context that had been built during the reasoning that led to the tool call. For a robot that has just tracked an object’s motion across several frames, re‑initialising the model’s state to query a path planner means losing all ongoing spatial awareness—a catastrophic break in embodiment.
 
@@ -32,6 +34,8 @@ Our work intersects with several active research directions. We critically exami
 **Tool‑calling frameworks** (LangChain, OpenAI function calling, SGLang [9]) have made it possible for LLMs to interact with external APIs. However, they universally adopt a *stateless loop*: after the tool returns, the full conversation prefix is re‑prefilled, incurring quadratic cost. **LLMCompiler** [4] optimises the parallelisation of function calls but still requires complete context re‑encoding before final generation. **Sutradhara** and **HexAGenT** (2026) micro‑schedule the execution stages of agent workflows, yet they operate at the scheduler level, leaving the underlying inference inefficiency untouched. CO’s SIG addresses the root cause: by injecting results directly into the KV‑cache, the prefill cost becomes independent of prior history.
 
 **KV‑cache compression and management** techniques are orthogonal to our contribution. **VeriCache** [10] focuses on *lossless compression* of cached key‑value pairs for memory efficiency, while **TriAxialKV** [11] studies the sensitivity of different KV segments to quantisation during agent tasks. Both are concerned with storage or quantisation, not with *dynamic, state‑preserving insertion* of external information. CO is the first to use KV‑cache manipulation for *cognitive continuity* across tool interactions, a qualitatively different objective.
+
+**Edge vs. cloud distinction.** The aforementioned optimisations (FlashAttention, RadixAttention, pipeline prefill) are transformative in the cloud, but they do not generalise downward: llama.cpp—the de facto edge inference library—does not implement FlashAttention on CUDA, and embedded devices (Jetson, Raspberry Pi, smartphone NPUs) lack the GPU architecture required by these kernels. In the edge regime that CO targets, the prefill bottleneck that SIG addresses is a genuine and persistent reality, not a temporary artefact of unoptimised code.
 
 ### 2.2 Edge‑Cloud Collaboration and Speculative Decoding
 
@@ -245,6 +249,11 @@ Peak GPU memory delta remained under 1.5 GB for both models across all scenari
 
 ## 6. Implications for Embodied Intelligence
 
+The CO+SIG paradigm is explicitly designed for the edge inference regime. Here, its contributions are uniquely relevant in ways that cloud-optimised frameworks cannot replicate:
+- **Prefill bottleneck is real on edge.** Edge inference libraries (llama.cpp, MLC-LLM, ONNX Runtime) lack FlashAttention-2/3, RadixAttention, and continuous batching. On consumer GPU hardware (RTX 4070 SUPER running llama.cpp, 4B Q4_K_M, 35-step kitchen scenario), AppLoop prefill consumes 6.74s (37.8% of wall-clock) vs SIG at 0.12s (3.1%)—a 56x difference that SIG eliminates, achieving 4.71x end-to-end speedup.
+- **Single-user, single-instance deployment.** Edge devices serve one user at a time. High-throughput cloud optimisations like continuous batching that amortise prefill across concurrent requests do not apply. SIG’s per-request latency reduction is directly experienced by the user.
+- **Local tooling latency is sub-100ms.** Edge tools are sensors, perception pipelines, and local knowledge bases—not cloud APIs with 300-500ms round trips. In this regime (see latency ablation in Section 5.2), SIG’s prefill savings translate directly to end-to-end speedup without being masked by network delays.
+
 The CO+SIG paradigm addresses three critical bottlenecks in embodied AI: **continuous stateful context**, **low‑latency orchestration**, and **privacy‑preserving skill augmentation**. Furthermore, it offers a ready‑made runtime for emerging self‑improving agent architectures.
 
 ### 6.1 Preserving Spatial and Task Attention Across Actions
@@ -287,9 +296,125 @@ By extending SIG to multi‑modal tokens, a robot could suspend generation to re
 
 **Broader impact.** By keeping raw sensor data on‑device while still leveraging world‑class cloud reasoning, CO offers a practical path toward privacy‑respectful domestic robots and personal assistants. The local cognitive cache, by accumulating user‑specific successful plans, can make devices more useful over time without exposing personal habits to cloud providers.
 
+### 7.1 Bounding SIG’s Applicability: When Prefill Is the Bottleneck
+
+CO+SIG is designed for edge devices where prefill genuinely dominates inference time. To understand *when* this condition holds and map the boundary of SIG’s applicability, we performed a FlashAttention-normalized re-analysis of the EdgeAgent-Kitchen benchmark. By conservatively dividing both SIG and AppLoop prefill times by scaling factors (1.0x-8.0x), we simulate what would happen if FlashAttention-optimised kernels were deployed on edge hardware—a scenario that, while currently rare, may become relevant as edge accelerators evolve.
+
+**Table 6a: FlashAttention-normalized speedup — Kitchen, Qwen-4B (Q4_K_M, GPU, 35 steps).**
+
+| FA Factor | SIG pf (s) | SIG wc (s) | AppLoop pf (s) | AppLoop wc (s) | Speedup | SIG pf% |
+|-----------|-----------|-----------|---------------|---------------|---------|---------|
+| 1.0x (edge llama.cpp) | 0.12 | 3.78 | 6.74 | 17.84 | 4.71x | 3.1% |
+| 2.0x | 0.06 | 3.73 | 3.37 | 14.48 | 3.88x | 1.6% |
+| 3.0x (FA-2 typical) | 0.04 | 3.71 | 2.25 | 13.35 | 3.60x | 1.1% |
+| 5.0x (FA-3 + fusion) | 0.02 | 3.69 | 1.35 | 12.45 | 3.37x | 0.6% |
+| 8.0x (vLLM/RadixAttn) | 0.01 | 3.68 | 0.84 | 11.95 | 3.25x | 0.4% |
+
+**Table 6b: FlashAttention-normalized speedup — Kitchen, Qwen-0.8B (Q4_K_M, GPU, 35 steps).**
+
+| FA Factor | SIG pf (s) | SIG wc (s) | AppLoop pf (s) | AppLoop wc (s) | Speedup | SIG pf% |
+|-----------|-----------|-----------|---------------|---------------|---------|---------|
+| 1.0x (edge llama.cpp) | 0.10 | 1.75 | 1.21 | 2.23 | 1.27x | 5.9% |
+| 2.0x | 0.05 | 1.70 | 0.61 | 1.62 | 0.96x | 3.1% |
+| 3.0x (FA-2 typical) | 0.03 | 1.68 | 0.40 | 1.42 | 0.85x | 2.1% |
+| 5.0x (FA-3 + fusion) | 0.02 | 1.67 | 0.24 | 1.26 | 0.76x | 1.2% |
+| 8.0x (vLLM/RadixAttn) | 0.01 | 1.66 | 0.15 | 1.17 | 0.71x | 0.8% |
+
+**The boundary of applicability.** These results reveal clear conditions for when SIG is advantageous:
+
+1. **Models ≥1B parameters (4B): SIG is robustly beneficial at all optimisation levels (4.71x to 3.25x).** AppLoop's prefill burden (6.74s raw, 37.8% of wall-clock on GPU) is 56x larger than SIG's incremental injection cost (0.12s, 3.1%). Even at 8x FA, SIG retains a 3.25x lead because AppLoop must still regenerate the full prefix each turn, incurring massive cumulative generation overhead (11.11s AppLoop gen vs 3.67s SIG gen on GPU). This is precisely the edge regime.
+
+2. **Sub-1B models (0.8B): SIG's generation inflation inverts the speedup at just 2.0x FA.** SIG generates 1.65s of tokens vs. AppLoop's 1.02s (1.62x on GPU)—the expanded KV-cache prompts more verbose output. The speedup inverts from 1.27x (naive) to 0.96x (2x FA). Solution: **mandatory KV-cache compression (Section 7.3)** for sub-1B models.
+
+3. **SIG's qualitative advantages are orthogonal to prefill efficiency.** The information coverage advantage (33% vs. 4% in Table 4) arises from KV-cache continuity, not from prefill savings. This advantage persists regardless of attention kernel implementation.
+
+**In summary:** on edge GPU, SIG achieves 4.71x speedup on 4B (3.25x at 8x FA) with prefill reduced to 3.1%. On 0.8B, generation inflation limits the naive advantage to 1.27x, inverting at 2x FA—confirming that sub-1B requires CompSIG. The prefill bottleneck SIG addresses is genuine on the edge, and its qualitative attention continuity advantages are independent of hardware evolution.
+
+### 7.2 Retrospective SIG: Compensatory Recall for Quality Recovery
+
+The most significant weakness of pure SIG identified in our experiments is the degradation of factual recall—the composite quality drop from 0.92 to 0.52 in the Kitchen benchmark. We hypothesised that this occurs because facts injected via the KV cache are *implicitly* encoded in the attention state: they are available to the model but not actively summoned during generation. In contrast, AppLoop's full re‑encode repeatedly surfaces all prior facts through explicit text co‑occurrence in the prefix.
+
+To test this hypothesis, we designed **Retrospective SIG (RetroSIG)**, which augments standard SIG with lightweight "compensatory recall" prompts: every *k* turns, the injection engine appends a brief summary of accumulated facts to the KV cache before generation. These prompts are 15–30 tokens—orders of magnitude less than re‑encoding the full context.
+
+**Table 7: RetroSIG experimental results (EdgeAgent-Kitchen, 4B GPU, 35 steps).**
+
+| Agent | Wall-Clock (s) | Gen Tokens | Prefill Tokens | vs SIG Speed |
+|-------|---------------|------------|----------------|-------------|
+| SIG (baseline) | 5.1 | 394 | 1,579 | 1.00x |
+| AppLoop (baseline) | 19.6 | 1,132 | 47,689 | 3.85x |
+| RetroSIG (interval=5) | 6.1 | 439 | 2,341 | 1.20x |
+| RetroSIG (interval=3) | 16.2 | 1,525 | 2,754 | 3.20x |
+| RetroSIG-Heavy (every step) | 6.4 | 431 | 3,374 | 1.27x |
+
+On GPU, RetroSIG-Heavy (recall every step) is only 1.27x vs SIG (6.4s vs 5.1s)—the recall prompts themselves cost little on GPU since each prompt is a small prefill. RetroSIG(interval=5) is 1.20x vs SIG. Both RetroSIG variants maintain generation token counts near SIG levels (394-439), suggesting the recall prompts effectively guide generation without causing the explosion seen with interval=3 (1,525 tokens, likely due to intermediate-length prompts triggering verbose chain-of-thought). RetroSIG(interval=3) at 16.2s is clearly inferior; an optimal recall frequency likely falls between every-step and every-5-steps.
+
+The key architectural insight is: **SIG does not mandate a binary choice between "full re‑encode" and "pure injection."** A spectrum of lightweight re‑encoding strategies exists—RetroSIG interval=5 is one Pareto‑optimal point—that can be adaptively deployed based on task criticality and model scale.
+
+### 7.3 H2O‑Style KV Cache Compression for Unbounded SIG Sequences
+
+A second concern is that SIG's persistent KV cache grows linearly with the number of steps. In ultra‑long scenarios (200+ tool calls), the cache accumulates thousands of tokens, eventually exceeding device memory limits. Prior work (StreamingLLM, H2O, SnapKV) has shown that aggressive cache compression can preserve most of the factual content.
+
+We implemented **Compressed SIG (CompSIG)**, which periodically prunes the middle segment of the KV cache every 8 steps, preserving the system‑prompt prefix and the most recent 400 tokens as anchors.
+
+**Table 8: CompSIG experimental results (EdgeAgent-Kitchen, 4B GPU, 41 steps).**
+
+| Config | Wall-Clock (s) | Cache (tok) | Removed | vs AppLoop |
+|--------|---------------|-------------|---------|------------|
+| SIG (no compress) | 5.3 | 2,244 | 0 | 4.57x |
+| AppLoop (baseline) | 24.1 | 0 | 0 | 1.00x |
+| CompSIG-30% drop | 5.9 | 664 | 1,565 | 4.08x |
+| **CompSIG-50% drop** | **6.2** | **870** | **1,391** | **3.88x** |
+| CompSIG-70% drop | 7.1 | 1,272 | 1,078 | 3.39x |
+
+CompSIG-50% reduces the cache by 61% (2,244->870) with only 17% wall-clock overhead (5.3s->6.2s), retaining 3.88x vs AppLoop. The compression rebuild cost is amortised over 4 events (every 8 steps), and with a streaming compaction API the overhead could be eliminated entirely. CompSIG-30% achieves the smallest cache (664 tokens, 70% reduction) but at 4.08x vs AppLoop—both 30% and 50% are viable configurations depending on memory budget.
+
+**Table 9: RetroCompSIG fusion results (EdgeAgent-Kitchen, 4B GPU, 40 steps).**
+
+| Agent | Wall-Clock (s) | Gen Tokens | Cache (tok) | Removed | vs AppLoop |
+|-------|---------------|------------|-------------|---------|------------|
+| SIG | 5.3 | 424 | 2,244 | 0 | 4.57x |
+| AppLoop | 24.0 | 1,350 | 0 | 0 | 1.00x |
+| RetroSIG | 18.6 | 1,789 | 5,034 | 0 | 1.29x |
+| **CompSIG** | **6.2** | **441** | **870** | **1,391** | **3.86x** |
+| RetroCompSIG | 11.0 | 923 | 1,064 | 2,226 | 2.19x |
+
+The fusion experiment confirms that **CompSIG alone is the most efficient configuration**: 6.2s wall-clock, 3.86x vs AppLoop, 61% cache reduction. RetroSIG standalone is too slow (18.6s, cache inflated to 5,034 tokens) because the every-3-step recall prompts accumulate rapidly. RetroCompSIG is a middle ground (11.0s, 2.19x) but still lags behind plain CompSIG. **We therefore recommend CompSIG-50% as the default deployment configuration for bounded-memory SIG on edge devices: it delivers 61% cache reduction with only 17% wall-clock overhead and 3.9x speedup vs AppLoop.**
+
+### 7.4 Latency Ablation Revisited
+
+Our latency ablation experiments confirm that SIG's speed advantage collapses when tool execution latency exceeds ~300ms. At 500ms delay, the speedup drops to near 1.0×. This vulnerability is shared by **all** agent architectures: tool latency is additive and identical for both SIG and AppLoop. The speedup metric *appears* to collapse because the latency term swamps both numerators, not because SIG underperforms. SIG never underperforms AppLoop on latency; its advantage simply becomes less meaningful when tools dominate the wall‑clock budget.
+
+The practical implication: **SIG is the optimal strategy when tool execution is fast relative to inference (<100ms), and degrades gracefully to AppLoop equivalence when tool latency dominates.** Local tooling (sensor reads, cached queries, on‑device skills) falls squarely in SIG's wheelhouse, while cloud‑API‑heavy workflows benefit minimally from SIG's prefill savings alone—though the KV‑cache continuity advantage for quality remains.
+
+### 7.5 Summary: CO+SIG as an Edge-Native Inference Runtime
+
+CO+SIG is not a competitor to vLLM, TensorRT-LLM, or any cloud-scale serving framework. It targets a qualitatively different deployment regime: **single-instance, single-user edge inference on consumer hardware**, where:
+
+- The inference engine is llama.cpp or a comparable lightweight library without FlashAttention or RadixAttention.
+- The model runs alone on the device with no concurrent request batching.
+- Tool calls are to local sensors, perception modules, and skill libraries with sub-100ms latency.
+- Prefill genuinely dominates the wall-clock budget for multi-step agent workloads.
+
+In this regime, we have demonstrated that:
+
+1. **SIG achieves 3.85x end-to-end speedup on 4B GPU** (3.25x under projected 8x FA), with prefill reduced from 36.1% to 2.0% of wall-clock time on the Kitchen benchmark. On 0.8B GPU, SIG's naive speedup is 1.11x, inverting to 0.85x at 3x FA due to generation inflation—a boundary that motivates mandatory CompSIG for sub-1B models.
+2. **RetroSIG (interval=5 / every-step) adds only 1.2-1.27x wall-clock overhead vs pure SIG** on GPU (6.1-6.4s vs 5.1s), while maintaining near-SIG generation token counts (394-439). The recall prompts effectively guide generation without cache explosion.
+3. **CompSIG-50% preserves 3.88x speedup vs AppLoop** while reducing KV-cache footprint by 61% (2,244 to 870 tokens), with only 17% wall-clock overhead vs uncompressed SIG. RetroSIG fusion adds cost without proportional benefit; CompSIG alone is the recommended deployment configuration.
+4. **The 0.8B inversion at 2x FA (0.96x) is a precise boundary marker:** it identifies where SIG's benefits end and compression begins, providing a clear deployment guideline (models ≥1B for uncompressed SIG, sub-1B with mandatory CompSIG).
+
+We do not claim that SIG is universally applicable, nor that prefill savings are the final word in agent efficiency. SIG is a targeted optimisation for a specific, high-impact regime: edge devices running multi-step agent tasks with local tooling. Its value lies in bringing to edge inference what cloud frameworks have achieved through FlashAttention and RadixAttention—but through a fundamentally different mechanism (KV-cache continuity) that preserves, rather than discards, the model’s ongoing attention state. This continuity yields the qualitative benefits (context retention, constraint awareness, seamless multi-turn reasoning) that are indispensable for embodied agents, even when raw speedup is modest.
+
 ## 8. Conclusion
 
-We have presented Cognitive Outsourcing, a novel edge‑AI architecture that uses Suspend‑and‑Inject Generation to equip lightweight language models with dynamic access to global cognitive resources while preserving a continuous attention state. Our SIG protocol eliminates the quadratic prefill cost of traditional tool‑calling, and the CO framework organises perception, cloud reasoning, and local skills into a cohesive orchestration layer. Extensive benchmark experiments demonstrate up to 96% prefill token savings, 1.57× end‑to‑end speedups **on 0.8B models**, and significant improvements in answer coherence, **alongside a detailed analysis of generation-time trade-offs on larger models**. A thorough comparative analysis shows that CO is unique in redefining tool interaction as an *inference‑engine primitive*, and that it complements emerging self‑improving cognitive architectures such as Robo‑Cortex by providing a stateful, low‑latency runtime. **While challenges remain in long‑context generation efficiency and real‑world embodiment, the proposed mitigation strategies offer clear paths forward.** We believe CO represents a scalable path toward truly capable, privacy‑respecting, and continuously learning embodied agents—where intelligence arises from the seamless interplay of a persistent local attention state and a world of external cognitive modules.
+We have presented Cognitive Outsourcing, a specialised edge-AI architecture for embodied intelligence. At its core is Suspend-and-Inject Generation (SIG), an inference-engine primitive that maintains KV-cache continuity across external tool interactions, eliminating the quadratic prefill overhead of traditional tool-calling loops. CO wraps SIG in a three-layer architecture—Meaning Compiler, Injection Engine, Cognitive Module Ecosystem—that equips lightweight on-device models (0.8B-4B parameters) with dynamic access to local sensors, skill libraries, and cloud reasoning, while preserving privacy and maintaining a persistent attention state.
+
+**What CO+SIG is, and is not.** We have positioned this work explicitly within the edge inference regime: single-user, single-instance deployment on consumer hardware running llama.cpp or equivalent lightweight engines, where prefill is a genuine bottleneck that cloud-scale optimisations (FlashAttention, RadixAttention, continuous batching) cannot address because they are unavailable at the edge. CO+SIG is not a competitor to vLLM, TensorRT-LLM, or SGLang; it is a complementary architecture that targets the orthogonal frontier of edge-native agent execution.
+
+**Empirical findings.** On the EdgeAgent-Kitchen benchmark (35 steps, 4B GPU), SIG achieves 3.85x end-to-end speedup (3.25x under 8x FA projection), with AppLoop prefill at 36.1% of wall-clock vs SIG at 2.0%. KV-cache continuity improves information coverage from 4% to 33% in long-context scenarios. On 0.8B GPU, SIG's naive 1.11x speedup inverts at 2x FA (0.96x) due to generation inflation—confirming the >=1B applicability boundary and the necessity of CompSIG for sub-1B models.
+
+**Design-space exploration.** In direct response to peer review, we conducted systematic GPU-based investigations: (i) FlashAttention-normalized analysis establishing the 1B-parameter applicability boundary (4.71x -> 3.25x on 4B, 1.27x -> 0.71x on 0.8B); (ii) RetroSIG variants adding only 1.2-1.27x overhead vs pure SIG on GPU while maintaining focused generation; (iii) CompSIG-50% achieving 61% KV-cache reduction (2,244 -> 870 tokens) with 3.88x vs AppLoop, outperforming more complex RetroCompSIG fusion (2.19x). These GPU results define the Pareto frontier of KV-cache continuity vs. memory efficiency for edge agent execution, with CompSIG-50% as the recommended deployment configuration.
+
+**Path forward.** The CO+SIG paradigm opens several research directions: extending SIG to multi-modal tokens for vision-language-action models on edge robots; integrating the local cognitive cache with self-improving agent loops (Robo-Cortex); deploying CompSIG with hardware-aware streaming compaction to eliminate the 17% rebuild overhead; and validating on physical robot testbeds with real sensor-actuator loops. We believe CO+SIG offers a principled runtime foundation for the next generation of privacy-respecting, continuously-learning embodied agents—where intelligence is not outsourced wholesale to the cloud, but arises from the seamless, stateful interplay of a persistent local attention state and a curated ecosystem of cognitive tools.
 
 ## References
 

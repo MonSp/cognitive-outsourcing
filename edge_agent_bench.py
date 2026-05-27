@@ -1414,6 +1414,8 @@ def main():
     parser.add_argument("--r19-bandwidths", type=str, default="10,50,100")
     parser.add_argument("--no-gpu", action="store_true", default=False,
                         help="Force CPU inference (n_gpu_layers=0) for all agents — guarantees OOM-free fair comparison")
+    parser.add_argument("--tool-latency", type=int, default=0,
+                        help="Simulated per-tool execution delay in ms (for latency ablation)")
     args = parser.parse_args()
 
     needs_model = args.task != "none"
@@ -1431,6 +1433,11 @@ def main():
         model_path=args.model, n_ctx=args.n_ctx,
         n_threads=args.n_threads, n_gpu_layers=n_gpu)
     tools = KitchenToolRegistry()
+
+    if args.tool_latency > 0:
+        from core.tools import LatencyToolWrapper
+        tools = LatencyToolWrapper(tools, delay_ms=args.tool_latency)
+        print(f"  Tool latency simulation: {args.tool_latency}ms per call")
 
     if args.task in ("kitchen", "all"):
         run_kitchen(args, compiler, tools)
