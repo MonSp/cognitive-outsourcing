@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-05-27 10:20:55",
+  "passed": 7,
+  "failed": 4,
+  "total": 11,
+  "results": [
+    {
+      "test": "SemanticScorer (TF-IDF cosine + underscore normalization)",
+      "status": "PASS"
+    },
+    {
+      "test": "KitchenQualityEvaluator (composite scoring)",
+      "status": "FAIL",
+      "error": "Empty not zero: 0.075",
+      "traceback": "Traceback (most recent call last):\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 41, in run_test_section\n    func()\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 104, in _test_kitchen_quality\n    assert empty[\"composite\"] == 0.0, f\"Empty not zero: {empty['composite']}\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Empty not zero: 0.075\n"
+    },
+    {
+      "test": "TravelQualityEvaluator + City Normalization",
+      "status": "FAIL",
+      "error": "TravelQualityEvaluator.evaluate() takes 3 positional arguments but 4 were given",
+      "traceback": "last):\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 41, in run_test_section\n    func()\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 122, in _test_travel_quality\n    result = evaluator.evaluate(\"Paris has Eiffel Tower, Rome has Colosseum.\", [], [])\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: TravelQualityEvaluator.evaluate() takes 3 positional arguments but 4 were given\n"
+    },
+    {
+      "test": "mean_std utility (core/metrics.py)",
+      "status": "PASS"
+    },
+    {
+      "test": "compute_metrics_table",
+      "status": "FAIL",
+      "error": "",
+      "traceback": "Traceback (most recent call last):\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 41, in run_test_section\n    func()\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 150, in _test_metrics_table\n    assert \"sig_mean\" in table\n           ^^^^^^^^^^^^^^^^^^^\nAssertionError\n"
+    },
+    {
+      "test": "ToolRegistry (6 simulated tools)",
+      "status": "FAIL",
+      "error": "Missing city: Partly cloudy, 18C",
+      "traceback": "Traceback (most recent call last):\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 41, in run_test_section\n    func()\n  File \"D:\\trunk\\SIG\\output\\cognitive-outsourcing\\_run_tests_standalone.py\", line 165, in _test_tool_registry\n    assert \"paris\" in result.lower(), f\"Missing city: {result}\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Missing city: Partly cloudy, 18C\n"
+    },
+    {
+      "test": "LatencyToolWrapper (configurable delay)",
+      "status": "PASS"
+    },
+    {
+      "test": "Prompt Templates (core/prompts.py)",
+      "status": "PASS"
+    },
+    {
+      "test": "Scenario Builders (core/scenarios.py)",
+      "status": "PASS"
+    },
+    {
+      "test": "Cross-Architecture Detection (cross_arch_bench.py)",
+      "status": "PASS"
+    },
+    {
+      "test": "R1 Multi-Prompt Infrastructure (transformer_bench.py)",
+      "status": "PASS"
+    }
+  ]
+}

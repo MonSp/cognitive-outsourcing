@@ -2,6 +2,11 @@
 
 Merged from co_benchmark.py (the more complete version with per-turn TTF
 tracking and tool/chat turn separation) and r2_benchmark.py.
+
+Review improvements:
+  - Cumulative compute tracking (eval + generate time)
+  - Cache efficiency metrics (tokens injected vs generated)
+  - Fair SIG vs AppLoop comparison via total compute normalization
 """
 
 import re
@@ -26,6 +31,14 @@ def init_metrics() -> Dict:
         "chain_depth": 0,
         "chain_total": 0,
         "tool_results_text": "",
+        "cumulative_eval_time": 0.0,
+        "cumulative_gen_time": 0.0,
+        "cumulative_compute_time": 0.0,
+        "cache_injection_count": 0,
+        "cache_generate_count": 0,
+        "cache_evict_count": 0,
+        "cache_compact_count": 0,
+        "peak_cache_tokens": 0,
     }
 
 
@@ -136,11 +149,18 @@ def average_metrics(runs: List[Dict]) -> Dict:
         "total_prefill_tokens",
         "chain_depth",
         "chain_total",
+        "cumulative_eval_time",
+        "cumulative_gen_time",
+        "cumulative_compute_time",
+        "cache_injection_count",
+        "cache_generate_count",
+        "cache_evict_count",
+        "cache_compact_count",
     ]
     for f in sum_fields:
         avg[f] = sum(r.get(f, 0) for r in runs) / n
 
-    std_fields = ["total_gen_time", "total_prefill_time"]
+    std_fields = ["total_gen_time", "total_prefill_time", "cumulative_compute_time"]
     for f in std_fields:
         mean = avg[f]
         if n > 1:
@@ -150,6 +170,7 @@ def average_metrics(runs: List[Dict]) -> Dict:
             avg[f"{f}_std"] = 0.0
 
     avg["peak_gpu_delta"] = max(r.get("peak_gpu_delta", 0) for r in runs)
+    avg["peak_cache_tokens"] = max(r.get("peak_cache_tokens", 0) for r in runs)
     avg["final_answer"] = runs[0].get("final_answer", "")
     avg["tool_results_text"] = runs[0].get("tool_results_text", "")
 
@@ -240,7 +261,8 @@ def compute_metrics_table(sig_metrics: List[Dict], app_metrics: List[Dict],
     """Compute paired comparison statistics for SIG vs AppLoop metrics.
 
     Returns a dict with: label, sig_mean, sig_std, app_mean, app_std,
-    speedup, sig_quality, app_quality, quality_delta, n_pairs.
+    speedup, sig_quality, app_quality, quality_delta, n_pairs,
+    cumulative_compute_delta.
     """
     n = min(len(sig_metrics), len(app_metrics))
 
@@ -249,10 +271,16 @@ def compute_metrics_table(sig_metrics: List[Dict], app_metrics: List[Dict],
     sig_qualities = [m.get("quality_composite", 0) for m in sig_metrics[:n]]
     app_qualities = [m.get("quality_composite", 0) for m in app_metrics[:n]]
 
+    sig_compute = [m.get("cumulative_compute_time", 0) for m in sig_metrics[:n]]
+    app_compute = [m.get("cumulative_compute_time", 0) for m in app_metrics[:n]]
+
     sig_m, sig_s = mean_std(sig_times)
     app_m, app_s = mean_std(app_times)
     sq_m = sum(sig_qualities) / max(n, 1)
     aq_m = sum(app_qualities) / max(n, 1)
+
+    sig_compute_m = sum(sig_compute) / max(n, 1)
+    app_compute_m = sum(app_compute) / max(n, 1)
 
     return {
         "label": label,
@@ -265,4 +293,32 @@ def compute_metrics_table(sig_metrics: List[Dict], app_metrics: List[Dict],
         "app_quality": round(aq_m, 3),
         "quality_delta": round(sq_m - aq_m, 3),
         "n_pairs": n,
+        "sig_cumulative_compute_s": round(sig_compute_m, 4),
+        "app_cumulative_compute_s": round(app_compute_m, 4),
+        "compute_ratio": round(app_compute_m / max(sig_compute_m, 0.001), 3),
+    }
+
+
+def compute_cache_efficiency(metrics: Dict) -> Dict:
+    """Compute cache efficiency metrics from a single run's metrics dict.
+
+    Returns:
+        injection_ratio: fraction of total time spent on cache injection
+        generation_ratio: fraction of total time spent on generation
+        tokens_per_injection: average tokens injected per injection call
+        compute_per_token: average compute time per token (injected + generated)
+    """
+    eval_time = metrics.get("cumulative_eval_time", 0)
+    gen_time = metrics.get("cumulative_gen_time", 0)
+    total_compute = eval_time + gen_time
+
+    injected = metrics.get("total_prefill_tokens", 0)
+    generated = metrics.get("total_gen_tokens", 0)
+    inject_count = metrics.get("cache_injection_count", 0)
+
+    return {
+        "injection_ratio": round(eval_time / max(total_compute, 0.001), 4),
+        "generation_ratio": round(gen_time / max(total_compute, 0.001), 4),
+        "tokens_per_injection": round(injected / max(inject_count, 1), 1),
+        "compute_per_token_ms": round(1000 * total_compute / max(injected + generated, 1), 2),
     }

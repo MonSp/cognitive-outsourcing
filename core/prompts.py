@@ -2,6 +2,9 @@
 
 Collected from co_benchmark.py and r2_benchmark.py so that all prompt
 strings live in one place and can be reused across experiment scripts.
+
+Review improvement:
+  - Added MEMORY_RETRIEVAL_PROMPT for explicit memory recall before generation
 """
 
 import re
@@ -91,5 +94,18 @@ Observations gathered:
 {observations}
 
 Now provide your answer:"""
+
+MEMORY_RETRIEVAL_PROMPT = """Before providing your final answer, first recall and list ALL specific items, values, and facts that were mentioned in the tool results above. Be exhaustive and precise.
+
+Specifically, enumerate:
+1. All named items (recipes, products, places, etc.)
+2. All numerical values (prices, quantities, temperatures, etc.)
+3. All categories and classifications
+4. All constraints and conditions mentioned
+
+List them explicitly, then use this list to construct your comprehensive answer.
+
+Recalled items:
+"""
 
 NODE_PATTERN = re.compile(r'<<NODE:(\d+)>>')

@@ -2160,11 +2160,19 @@ def print_r3_empirical(results: Dict):
 # R1: SIG Injection Attention Distribution Analysis
 # ======================================================================
 
-def run_r1_attention(model_id: str = "Qwen/Qwen2.5-0.5B") -> Optional[Dict]:
+def run_r1_attention(model_id: str = "Qwen/Qwen2.5-0.5B",
+                     prompts: Optional[List[str]] = None) -> Optional[Dict]:
     """Measure attention distribution shift between SIG injection and full re-encoding.
 
     Uses HuggingFace transformers + modelscope to load models.
     Compares attention weights from full re-encoding vs SIG injection (past_key_values).
+
+    Updated per reviewer request: supports multiple prompts (3-5) and 1.5B+ models
+    for robust statistical inference beyond the initial single-prompt 0.5B measurement.
+
+    Args:
+        model_id: HuggingFace model ID or modelscope path
+        prompts: list of (prefix, injection) tuples; if None, uses default set
     """
     try:
         import torch
@@ -2199,77 +2207,196 @@ def run_r1_attention(model_id: str = "Qwen/Qwen2.5-0.5B") -> Optional[Dict]:
     model.eval()
     n_layers = model.config.num_hidden_layers
     n_heads = model.config.num_attention_heads
-    print(f"  Model loaded: {n_layers} layers, {n_heads} heads")
+    n_params = sum(p.numel() for p in model.parameters()) / 1e9
+    print(f"  Model loaded: {n_layers} layers, {n_heads} heads, {n_params:.2f}B params")
 
-    prefix = "You are a travel assistant.\nUser: Paris weather and attractions.\nAssistant: Let me check.\n"
-    injection = (
-        "[Tool Results]\nWeather Paris: 18C partly cloudy.\nAttractions: Eiffel Tower, Louvre, Notre-Dame.\n"
-        "Weather London: 15C overcast.\nAttractions: British Museum, Tower of London, Big Ben.\n\nContinue:\n"
-    )
+    if prompts is None:
+        prompts = _default_r1_prompts()
 
-    inputs_f = tokenizer(prefix + injection, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        out_f = model(**inputs_f, output_attentions=True)
-    attn_full = [a.cpu().numpy()[:, 0] for a in out_f.attentions]
+    print(f"  Evaluating {len(prompts)} prompts...")
 
-    inputs_p = tokenizer(prefix, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        out_p = model(**inputs_p, output_attentions=True, use_cache=True)
-    past_kv = out_p.past_key_values
-    inputs_i = tokenizer(injection, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        out_i = model(input_ids=inputs_i["input_ids"], past_key_values=past_kv,
-                     output_attentions=True, use_cache=True)
-    attn_inj = [a.cpu().numpy()[:, 0] for a in out_i.attentions]
+    all_prompt_results = []
+    for pi, (prefix, injection, label) in enumerate(prompts):
+        print(f"\n  Prompt {pi+1}/{len(prompts)}: {label}")
 
-    layer_results = []
+        inputs_f = tokenizer(prefix + injection, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            out_f = model(**inputs_f, output_attentions=True)
+        attn_full = [a.cpu().numpy()[:, 0] for a in out_f.attentions]
+
+        inputs_p = tokenizer(prefix, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            out_p = model(**inputs_p, output_attentions=True, use_cache=True)
+        past_kv = out_p.past_key_values
+        inputs_i = tokenizer(injection, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            out_i = model(input_ids=inputs_i["input_ids"], past_key_values=past_kv,
+                         output_attentions=True, use_cache=True)
+        attn_inj = [a.cpu().numpy()[:, 0] for a in out_i.attentions]
+
+        layer_results = []
+        for l in range(n_layers):
+            ms = min(attn_full[l].shape[2], attn_inj[l].shape[2])
+            agrs, csims = 0.0, []
+            for h in range(n_heads):
+                af = attn_full[l][h, :ms, :ms].mean(axis=0)
+                ai = attn_inj[l][h, :ms, :ms].mean(axis=0)
+                t5f = set(np.argsort(-af)[:5])
+                t5i = set(np.argsort(-ai)[:5])
+                agrs += len(t5f & t5i) / 5.0
+                d = np.dot(af, ai)
+                n = np.linalg.norm(af) * np.linalg.norm(ai)
+                csims.append(float(d / max(n, 1e-10)))
+            layer_results.append({
+                "layer": l, "head_agreement": agrs / n_heads,
+                "cosine_similarity": float(np.mean(csims))
+            })
+        all_prompt_results.append(layer_results)
+
+    aggregated_layers = []
+    n_prompts = len(all_prompt_results)
     for l in range(n_layers):
-        ms = min(attn_full[l].shape[2], attn_inj[l].shape[2])
-        agrs, csims = 0.0, []
-        for h in range(n_heads):
-            af = attn_full[l][h, :ms, :ms].mean(axis=0)
-            ai = attn_inj[l][h, :ms, :ms].mean(axis=0)
-            t5f = set(np.argsort(-af)[:5])
-            t5i = set(np.argsort(-ai)[:5])
-            agrs += len(t5f & t5i) / 5.0
-            d = np.dot(af, ai)
-            n = np.linalg.norm(af) * np.linalg.norm(ai)
-            csims.append(float(d / max(n, 1e-10)))
-        layer_results.append({
-            "layer": l, "head_agreement": agrs / n_heads,
-            "cosine_similarity": float(np.mean(csims))
+        ha_vals = [p[l]["head_agreement"] for p in all_prompt_results]
+        cs_vals = [p[l]["cosine_similarity"] for p in all_prompt_results]
+        aggregated_layers.append({
+            "layer": l,
+            "head_agreement": float(np.mean(ha_vals)),
+            "head_agreement_std": float(np.std(ha_vals, ddof=1)) if n_prompts > 1 else 0.0,
+            "cosine_similarity": float(np.mean(cs_vals)),
+            "cosine_similarity_std": float(np.std(cs_vals, ddof=1)) if n_prompts > 1 else 0.0,
         })
 
     t = n_layers // 3
     def avg(layers_r, key):
         vals = [r[key] for r in layers_r]
         return sum(vals) / max(len(vals), 1)
+    def stdv(layers_r, key):
+        vals = [r[key] for r in layers_r]
+        if len(vals) <= 1:
+            return 0.0
+        return float(np.std(vals, ddof=1))
 
     regions = {
-        "early": {"layers": f"0-{t-1}", **{k: avg(layer_results[:t], k) for k in ["head_agreement", "cosine_similarity"]}},
-        "middle": {"layers": f"{t}-{2*t-1}", **{k: avg(layer_results[t:2*t], k) for k in ["head_agreement", "cosine_similarity"]}},
-        "late": {"layers": f"{2*t}-{n_layers-1}", **{k: avg(layer_results[2*t:], k) for k in ["head_agreement", "cosine_similarity"]}},
-        "overall": {"layers": f"0-{n_layers-1}", **{k: avg(layer_results, k) for k in ["head_agreement", "cosine_similarity"]}},
+        "early": {"layers": f"0-{t-1}",
+                  "head_agreement": avg(aggregated_layers[:t], "head_agreement"),
+                  "head_agreement_std": stdv(aggregated_layers[:t], "head_agreement"),
+                  "cosine_similarity": avg(aggregated_layers[:t], "cosine_similarity"),
+                  "cosine_similarity_std": stdv(aggregated_layers[:t], "cosine_similarity")},
+        "middle": {"layers": f"{t}-{2*t-1}",
+                   "head_agreement": avg(aggregated_layers[t:2*t], "head_agreement"),
+                   "head_agreement_std": stdv(aggregated_layers[t:2*t], "head_agreement"),
+                   "cosine_similarity": avg(aggregated_layers[t:2*t], "cosine_similarity"),
+                   "cosine_similarity_std": stdv(aggregated_layers[t:2*t], "cosine_similarity")},
+        "late": {"layers": f"{2*t}-{n_layers-1}",
+                 "head_agreement": avg(aggregated_layers[2*t:], "head_agreement"),
+                 "head_agreement_std": stdv(aggregated_layers[2*t:], "head_agreement"),
+                 "cosine_similarity": avg(aggregated_layers[2*t:], "cosine_similarity"),
+                 "cosine_similarity_std": stdv(aggregated_layers[2*t:], "cosine_similarity")},
+        "overall": {"layers": f"0-{n_layers-1}",
+                    "head_agreement": avg(aggregated_layers, "head_agreement"),
+                    "head_agreement_std": stdv(aggregated_layers, "head_agreement"),
+                    "cosine_similarity": avg(aggregated_layers, "cosine_similarity"),
+                    "cosine_similarity_std": stdv(aggregated_layers, "cosine_similarity")},
     }
 
     result = {
         "task": "r1_attention",
         "model_id": model_id,
+        "n_params_b": n_params,
         "n_layers": n_layers,
         "n_heads": n_heads,
+        "n_prompts": n_prompts,
         "regions": regions,
-        "layer_details": layer_results,
+        "layer_details": aggregated_layers,
+        "per_prompt_details": all_prompt_results if n_prompts <= 5 else [],
+        "caveat": (_r1_caveat(model_id, n_params))
     }
 
-    print(f"\n{'='*70}")
-    print(f"  LAYER SENSITIVITY ANALYSIS")
-    print(f"{'='*70}")
-    print(f"  {'Region':<12} {'Layers':<12} {'Head Agr':<10} {'Cos Sim':<10}")
-    print(f"  {'-'*12} {'-'*12} {'-'*10} {'-'*10}")
-    for name, reg in regions.items():
-        print(f"  {name.capitalize():<12} {reg['layers']:<12} {reg['head_agreement']:<10.3f} {reg['cosine_similarity']:<10.3f}")
+    _print_r1_results(regions, n_layers, n_heads, model_id, n_params, n_prompts)
 
     return result
+
+
+def _default_r1_prompts():
+    """Return a list of (prefix, injection, label) tuples for R1 multi-prompt analysis."""
+    return [
+        (
+            "You are a travel assistant.\nUser: Paris weather and attractions.\nAssistant: Let me check.\n",
+            (
+                "[Tool Results]\nWeather Paris: 18C partly cloudy.\nAttractions: Eiffel Tower, Louvre, Notre-Dame.\n"
+                "Weather London: 15C overcast.\nAttractions: British Museum, Tower of London, Big Ben.\n\nContinue:\n"
+            ),
+            "Travel (Paris+London)"
+        ),
+        (
+            "You are a kitchen assistant.\nUser: What recipes do I have?\nAssistant: Let me look up your recipes.\n",
+            (
+                "[Tool Results]\nRecipes: spaghetti_bolognese, chicken_stir_fry, caprese_salad.\n"
+                "Allergens: dairy. Servings: 2. Cuisine preference: Italian.\n\nContinue with your response:\n"
+            ),
+            "Kitchen (recipe query)"
+        ),
+        (
+            "You are a code assistant.\nUser: Find bugs in this function.\ndef add(a, b): return a - b\nAssistant: Let me analyze.\n",
+            (
+                "[Tool Results]\nLint: no syntax errors.\nTest: add(2,3)= -1 (expected 5). "
+                "Bug: subtraction instead of addition at line 1.\n\nContinue:\n"
+            ),
+            "Code (debugging)"
+        ),
+        (
+            "You are a research assistant.\nUser: Summarize the key findings.\n"
+            "Assistant: I'll review the provided materials.\n",
+            (
+                "[Tool Results]\nPaper: Transformer attention patterns show sink tokens "
+                "in early layers capture 80% of attention mass. Late layers distribute "
+                "attention more uniformly. KV-cache compression should prioritize early "
+                "layer preservation.\n\nContinue your summary:\n"
+            ),
+            "Research (paper summary)"
+        ),
+        (
+            "You are a navigation assistant.\nUser: How do I get from A to B?\n"
+            "Assistant: Checking routes.\n",
+            (
+                "[Tool Results]\nRoute A->B: 3.2km via Main St (12min walk). "
+                "Route A->C: 5.1km via Park Ave (18min walk). "
+                "Route B->C: 2.8km via Oak Rd (9min walk).\n\nContinue:\n"
+            ),
+            "Navigation (routing)"
+        ),
+    ]
+
+
+def _r1_caveat(model_id, n_params):
+    if n_params < 1.0:
+        return ("PRELIMINARY OBSERVATION (sub-1B model). "
+                "Attention patterns at this scale may not generalise to larger models. "
+                "Multi-prompt averaging provides cross-prompt robustness but "
+                "cross-model validation at >=1.5B is needed for general claims.")
+    elif n_params < 2.0:
+        return ("MODERATE-SCALE measurement (1-2B). "
+                f"Results obtained on {model_id} with {len(_default_r1_prompts())} prompts. "
+                "Cross-model validation at additional architectures recommended "
+                "for architectural generalisation.")
+    else:
+        return (f"Multi-prompt measurement on {model_id} ({n_params:.2f}B). "
+                "Attention patterns generalise within this model family "
+                "but may differ across architectures (GQA, pre-norm, etc.).")
+
+
+def _print_r1_results(regions, n_layers, n_heads, model_id, n_params, n_prompts):
+    print(f"\n{'='*70}")
+    print(f"  LAYER SENSITIVITY ANALYSIS ({n_prompts} prompts, {n_params:.2f}B, {n_layers}L/{n_heads}H)")
+    print(f"{'='*70}")
+    print(f"  {'Region':<12} {'Layers':<12} {'Head Agr':<12} {'Cos Sim':<12} {'±σ(HA)':<10}")
+    print(f"  {'-'*12} {'-'*12} {'-'*12} {'-'*12} {'-'*10}")
+    for name, reg in regions.items():
+        ha_s = reg.get("head_agreement_std", 0)
+        print(f"  {name.capitalize():<12} {reg['layers']:<12} "
+              f"{reg['head_agreement']:<12.3f} {reg['cosine_similarity']:<12.3f} "
+              f"±{ha_s:<9.3f}")
+    print(f"\n  Caveat: {_r1_caveat(model_id, n_params)}")
 
 
 # ======================================================================

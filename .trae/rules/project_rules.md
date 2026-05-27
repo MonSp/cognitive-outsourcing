@@ -2,17 +2,17 @@
 
 ## Python Environment
 
-Use Python 3.11 with CUDA acceleration. **Must add torch/lib to DLL search path** before importing llama-cpp-python:
+Use conda environment `sig_bench` at `D:\ProgramData\miniconda3\envs\sig_bench`:
 
 ```powershell
-$env:PATH = "<path-to-torch-lib>;" + $env:PATH
-& python script.py ...
+& "D:\ProgramData\miniconda3\envs\sig_bench\python.exe" script.py ...
 ```
 
-Or use the helper `run_test.py` wrapper:
+Or activate the environment first:
 
 ```powershell
-python run_test.py --task r6 --model models/Qwen3.5-0.8B-Q4_K_M.gguf
+conda activate sig_bench
+python script.py ...
 ```
 
 All scripts require:

@@ -11,9 +11,11 @@ except ImportError:
     MeaningCompiler = None
 
 try:
-    from .injection import InjectionEngine
+    from .injection import InjectionEngine, CacheStats, DependencyAnalyzer
 except ImportError:
     InjectionEngine = None
+    CacheStats = None
+    DependencyAnalyzer = None
 from .tools import ToolRegistry
 from .gpu import GPUMonitor
 from .text_utils import normalize_city, CITY_ALIASES
@@ -28,8 +30,19 @@ from .prompts import (
     SIG_ANSWER_REMINDER,
     LOCAL_CO_PROMPT,
     NODE_PATTERN,
+    MEMORY_RETRIEVAL_PROMPT,
 )
-from .metrics import init_metrics, extract_key_facts, evaluate_answer_quality, average_metrics, compute_metrics_table, recall_continuity_score, token_rank_metric, mean_std
+from .metrics import (
+    init_metrics,
+    extract_key_facts,
+    evaluate_answer_quality,
+    average_metrics,
+    compute_metrics_table,
+    recall_continuity_score,
+    token_rank_metric,
+    mean_std,
+    compute_cache_efficiency,
+)
 from .info_theory import (
     kl_divergence,
     js_divergence,
