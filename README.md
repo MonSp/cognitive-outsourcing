@@ -1,151 +1,102 @@
-# Cognitive Outsourcing with Suspend-and-Inject Generation
+# Orthogonal Acceleration: SIG + Speculative Decoding for Edge Agent Inference
 
-Edge-AI architecture enabling lightweight on-device language models (as small as 0.8B) to dynamically access external cognitive resources while preserving continuous attention state through **Suspend-and-Inject Generation (SIG)**.
-
----
+> **Paper 5 in the [SIG/CO Research Program](https://github.com/sig-co)**
 
 ## Key Results
 
-| Metric | Qwen3.5-0.8B | Qwen3.5-4B |
-|--------|-------------|------------|
-| Prefill token savings | 73–93% | 78–97% |
-| Prefill time savings | 81% | 87% |
-| End-to-end speedup (teacher-precomputed) | **2.38×** | **2.70×** |
-| Peak speedup (deep chain, 14 tools) | **4.96×** | **5.26×** |
-| Per-token generation rate difference | < 2% | < 2% |
-| GPU VRAM overhead (SIG vs AppLoop) | +0.1 GB | +0.1 GB |
+| Metric | 4B Model | 0.8B Model |
+|--------|----------|------------|
+| SIG speedup (prefill elimination) | **2.91x** | 1.06x |
+| SIG+SpecDec speedup | **3.20x** | 0.83x |
+| N-gram acceptance rate (n=3) | **81.6%** | **90.8%** |
+| Orthogonality ratio ρ | 0.365* | **0.912** ✅ |
+| SIG-vs-AppLoop crossover | ~0.7B | — |
 
-> The speedup originates from **prefill savings**, not from faster per-token generation. See [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) for the full ten-chapter report.
+*\*4B ρ reflects generate()-path overhead, not mechanism interference.*
 
----
+## What This Paper Shows
 
-## Five-Dimensional Analysis
+1. **SIG achieves 2.91x wall-clock speedup** on 4B models by eliminating prefill redundancy across tool-call rounds
+2. **SIG + n-gram SpecDec achieves 3.20x** — a 10% improvement over SIG-only
+3. **N-gram drafter acceptance rates are 81–91%** on the EdgeAgent-Kitchen benchmark
+4. **The orthogonality framework is validated** (ρ = 0.912 on 0.8B, PASS)
+5. **Post-injection acceptance rate depression** of −36% at t=2 confirms the injection-event signal
+6. **Qwen3.5's hybrid attention architecture** (`full_attention_interval=4`) blocks llama.cpp's native `generate()` + drafter path
 
-| Dimension | Status | Key Finding |
-|-----------|--------|-------------|
-| **R1** Information Theory | ✅ Direct measurement | Attention head agreement 0.25→0.43 across layers (Qwen2.5-0.5B); early layers most sensitive |
-| **R2** Cache Degradation | ✅ Direct measurement | 6–10 round weather recall, no degradation (stable 0.50–1.00) |
-| **R3** Beyond Transformer | 🔧 Simulation + calibration | Transformer > xLSTM > RWKV > SSM/Mamba projected; empirically parameterized |
-| **R4** Teacher-Student Gap | ✅ First measurement | CoT amplification +0.80, SIG amplification +0.59, teacher margin 0.72 |
-| **R5** Privacy Guarantees | 🧪 Concept demo | PII redaction + intent-only outsourcing across 4 query types |
+## Read the Paper
 
----
-
-## Quick Start
-
-### Prerequisites
-
-```bash
-# Core dependencies
-pip install llama-cpp-python numpy
-
-# For R1 attention analysis
-pip install torch transformers modelscope
-```
-
-Download quantized GGUF models to `./models/`:
-```
-models/Qwen3.5-0.8B-Q4_K_M.gguf
-models/Qwen3.5-4B-Q4_K_M.gguf
-```
-
-### Three Entry Points
-
-```bash
-# ── CO benchmarks + R2/R4/R5 ──
-python co_benchmark.py --model models/Qwen3.5-0.8B-Q4_K_M.gguf --n-gpu-layers 99 --task baseline
-python co_benchmark.py --model models/Qwen3.5-0.8B-Q4_K_M.gguf --n-gpu-layers 99 --task r2 --r2-n-cities 8 --r2-probe-interval 2
-python co_benchmark.py --task r4                               # no model required
-python co_benchmark.py --task r5                               # no model required
-python co_benchmark.py --task r3                               # numpy simulation
-
-# ── SIG benchmarks + R1/R3 ──
-python sig_benchmark.py --model models/Qwen3.5-0.8B-Q4_K_M.gguf --n-gpu-layers 99 --task baseline
-python sig_benchmark.py --task r1 --r1-model-id Qwen/Qwen2.5-0.5B  # HuggingFace model
-python sig_benchmark.py --task r3
-
-# ── Universal Transformer testing engine ──
-python transformer_bench.py --task r1 --model-id Qwen/Qwen2.5-0.5B
-python transformer_bench.py --task r3
-python transformer_bench.py --task r3-empirical
-python transformer_bench.py --task all --output report.json
-```
-
-### Task Matrix
-
-| Script | `--task` | Needs GGUF? | Needs HF? | Description |
-|--------|----------|-------------|-----------|-------------|
-| `co_benchmark.py` | `baseline` | ✅ | | CO 9-scenario AppLoop vs SIG |
-| `co_benchmark.py` | `r2` | ✅ | | R2 KV-cache degradation (weather recall) |
-| `co_benchmark.py` | `r3` | | | R3 cross-architecture simulation |
-| `co_benchmark.py` | `r4` | | | R4 teacher-student capability gap |
-| `co_benchmark.py` | `r5` | | | R5 privacy PII anonymization demo |
-| `sig_benchmark.py` | `baseline` | ✅ | | SIG 9-scenario autonomous mode |
-| `sig_benchmark.py` | `r1` | | ✅ | R1 attention distribution analysis |
-| `sig_benchmark.py` | `r3` | | | R3 simulation + empirical calibration |
-| `transformer_bench.py` | `r1` | | ✅ | Standalone R1 attention analysis |
-| `transformer_bench.py` | `r3` | | | Standalone R3 cross-architecture |
-| `transformer_bench.py` | `r3-empirical` | | | CO benchmark parameterization |
-| `transformer_bench.py` | `all` | | ✅ | All tasks + JSON export |
-
----
-
-## Architecture
-
-```
-User Query → Meaning Compiler (local 0.8B/4B)
-    ↓
-Injection Engine (SIG — KV-cache continuity)
-    ├── Suspend: pause autoregressive decoding
-    ├── Inject: append tool results / CoT plans to KV-cache
-    └── Resume: continue generation without re-prefill
-    ↓
-Cognitive Module Ecosystem
-    ├── Cloud teachers (GPT-4, Claude, DeepSeek)
-    ├── Tool APIs (weather, search, flight, code)
-    └── Local skill libraries
-```
-
----
+📄 **[Full Paper (Markdown)](paper/5_Orthogonal_Acceleration/paper.md)**
 
 ## Repository Structure
 
 ```
-cognitive-outsourcing/
-├── core/                       # Runtime engine
-│   ├── compiler.py             # MeaningCompiler (llama.cpp wrapper)
-│   ├── injection.py            # InjectionEngine (SIG primitive)
-│   ├── prompts.py              # Prompt templates
-│   ├── tools.py                # Mock tool implementations
-│   ├── metrics.py              # Tool accuracy, timing
-│   ├── gpu.py                  # GPU memory monitor
-│   └── text_utils.py           # Text processing utilities
-├── co_benchmark.py             # CO entry point (baseline + R2/R3/R4/R5)
-├── sig_benchmark.py            # SIG entry point (baseline + R1/R3)
-├── transformer_bench.py        # Universal Transformer testing engine
-├── gen_plans.py                # Teacher CoT plan generator
-├── co_benchmark_plans.json     # Pre-computed teacher plans
-├── co_benchmark_prompts.json   # Scenario prompt definitions
-├── BENCHMARK_RESULTS.md        # Complete benchmark report (10 chapters)
-├── paper/                      # Paper and supporting documents
-│   ├── Beyond_the_Injection_Engine_*.md
-│   ├── Cognitive_Outsourcing_*.md
-│   └── *.pdf
-├── README.md
-├── TODO.md                     # Research roadmap (R1–R14)
-├── CODE_WIKI.md                # Developer documentation
-└── LICENSE
+├── README.md                          # This file
+├── paper/
+│   ├── 5_Orthogonal_Acceleration/     # This paper (Paper 5)
+│   │   ├── paper.md                   # Full paper (GitHub-rendered)
+│   │   └── figures/                   # All figures
+│   ├── Cognitive Outsourcing...md     # Paper 1
+│   ├── Beyond_the_Injection_Engine.md # Paper 2
+│   ├── CO_SIG_Architecture...md       # Paper 3
+│   └── Suspend-and-Inject...md        # Paper 4
+├── data/                              # Raw experiment data (JSON)
+│   ├── exp3_final_4B/                 # EXP-3: SIG+SpecDec on 4B
+│   ├── exp3_llamacpp_4B/              # EXP-3: llama.cpp results
+│   ├── exp456_4B/                     # EXP-4/5/6 on 4B
+│   └── exp456_08B/                    # EXP-4/5/6 on 0.8B
+├── core/                              # SIG inference engine
+│   ├── meaning_compiler.py            # KV-cache-aware compiler
+│   ├── injection.py                   # Injection engine
+│   ├── llamacpp_specdec.py            # Manual SpecDec (eval+sample)
+│   └── qwen35_compat.py              # Qwen3.5 compatibility layer
+├── edge_agent_bench.py                # EdgeAgent-Kitchen benchmark
+├── run_exp3_patched.py                # EXP-3 runner
+├── run_exp456.py                      # EXP-4/5/6 runner
+└── generate_figures.py                # Figure generation script
 ```
 
----
+## Quick Start
 
-## Paper
+```bash
+# Install dependencies
+pip install llama-cpp-python numpy matplotlib
 
-- **Beyond the Injection Engine: A Five-Dimensional Analysis of CO+SIG** — `paper/Beyond_the_Injection_Engine_A_Five_Dimensional_Analysis_of_CO-SIG.md`
-- **Original paper**: *Cognitive Outsourcing with Suspend-and-Inject Generation for Scalable Embodied Intelligence* — `paper/`
+# Download models
+# Qwen3.5-4B-Q4_K_M.gguf → models/
+# Qwen3.5-0.8B-Q4_K_M.gguf → models/
 
----
+# Run EXP-3 (SIG + SpecDec)
+python run_exp3_patched.py --model models/Qwen3.5-4B-Q4_K_M.gguf --n-runs 3
+
+# Run EXP-4/5/6
+python run_exp456.py --model models/Qwen3.5-4B-Q4_K_M.gguf --exp all
+
+# Generate figures
+python generate_figures.py
+```
+
+## The SIG/CO Research Program
+
+| Paper | Title | Status |
+|-------|-------|--------|
+| 1 | Cognitive Outsourcing with SIG for Scalable Embodied Intelligence | ✅ |
+| 2 | Beyond the Injection Engine: A Five-Dimensional Analysis of CO-SIG | ✅ |
+| 3 | CO-SIG Architecture, Theory, and Empirical Design Space | ✅ |
+| 4 | SIG as an Edge Inference Runtime Primitive for Long-Horizon Agent Tasks | ✅ |
+| **5** | **Orthogonal Acceleration: SIG + Speculative Decoding** | **✅ This paper** |
+
+## Citation
+
+```bibtex
+@article{sig-mtp-2026,
+  title={Orthogonal Acceleration: Fusing Multi-Token Prediction with 
+         Suspend-and-Inject Generation for Compound Edge Agent Inference},
+  author={SIG/CO Research Program},
+  year={2026},
+  note={Paper 5 in the SIG/CO Research Program}
+}
+```
 
 ## License
 
-MIT
+This research is part of the SIG/CO Research Program. See individual files for specific licenses.

@@ -1,0 +1,14 @@
+{
+  "run_id": 1,
+  "model": "Qwen3.5-0.8B-Q4_K_M",
+  "mode": "SIG",
+  "wall_clock_s": 2.505,
+  "gen_time_s": 1.678,
+  "gen_tokens": 482,
+  "prefill_tokens": 1579,
+  "tok_per_s": 287.2,
+  "vram_peak_mb": 2417.3671875,
+  "completion_count": 35,
+  "failure_count": 0,
+  "output_hash": "f019ac592967ff8e"
+}

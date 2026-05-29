@@ -62,3 +62,22 @@ from .quality import (
     build_kitchen_ground_truth,
     build_travel_ground_truth,
 )
+
+try:
+    from .specdec_compiler import (
+        SpeculativeDecodingCompiler,
+        InstrumentedSpecDecCompiler,
+        ModelDraftModel,
+        GenerationStepRecord,
+    )
+except ImportError:
+    SpeculativeDecodingCompiler = None
+    InstrumentedSpecDecCompiler = None
+    ModelDraftModel = None
+    GenerationStepRecord = None
+
+try:
+    from .acceptance_tracker import AcceptanceRateTracker, fit_recovery_model
+except ImportError:
+    AcceptanceRateTracker = None
+    fit_recovery_model = None

@@ -1,0 +1,110 @@
+[
+  {
+    "run_id": 0,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "AppLoop",
+    "wall_clock_s": 16.439,
+    "gen_time_s": 9.723,
+    "gen_tokens": 971,
+    "prefill_tokens": 45935,
+    "tok_per_s": 99.9,
+    "completion_count": 35
+  },
+  {
+    "run_id": 0,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "SIG",
+    "wall_clock_s": 5.623,
+    "gen_time_s": 4.601,
+    "gen_tokens": 490,
+    "prefill_tokens": 1579,
+    "tok_per_s": 106.5,
+    "completion_count": 35
+  },
+  {
+    "run_id": 0,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "SIG+SpecDec",
+    "wall_clock_s": 7.579,
+    "gen_time_s": 6.593,
+    "gen_tokens": 703,
+    "prefill_tokens": 1579,
+    "tok_per_s": 106.6,
+    "completion_count": 35,
+    "draft_proposed": 618,
+    "draft_accepted": 448,
+    "acceptance_rate": 0.725
+  },
+  {
+    "run_id": 1,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "AppLoop",
+    "wall_clock_s": 16.464,
+    "gen_time_s": 9.731,
+    "gen_tokens": 971,
+    "prefill_tokens": 45935,
+    "tok_per_s": 99.8,
+    "completion_count": 35
+  },
+  {
+    "run_id": 1,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "SIG",
+    "wall_clock_s": 5.716,
+    "gen_time_s": 4.715,
+    "gen_tokens": 490,
+    "prefill_tokens": 1579,
+    "tok_per_s": 103.9,
+    "completion_count": 35
+  },
+  {
+    "run_id": 1,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "SIG+SpecDec",
+    "wall_clock_s": 7.575,
+    "gen_time_s": 6.567,
+    "gen_tokens": 703,
+    "prefill_tokens": 1579,
+    "tok_per_s": 107.1,
+    "completion_count": 35,
+    "draft_proposed": 618,
+    "draft_accepted": 448,
+    "acceptance_rate": 0.725
+  },
+  {
+    "run_id": 2,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "AppLoop",
+    "wall_clock_s": 16.594,
+    "gen_time_s": 9.827,
+    "gen_tokens": 971,
+    "prefill_tokens": 45935,
+    "tok_per_s": 98.8,
+    "completion_count": 35
+  },
+  {
+    "run_id": 2,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "SIG",
+    "wall_clock_s": 5.638,
+    "gen_time_s": 4.636,
+    "gen_tokens": 490,
+    "prefill_tokens": 1579,
+    "tok_per_s": 105.7,
+    "completion_count": 35
+  },
+  {
+    "run_id": 2,
+    "model": "Qwen3.5-4B-Q4_K_M",
+    "mode": "SIG+SpecDec",
+    "wall_clock_s": 7.609,
+    "gen_time_s": 6.603,
+    "gen_tokens": 703,
+    "prefill_tokens": 1579,
+    "tok_per_s": 106.5,
+    "completion_count": 35,
+    "draft_proposed": 618,
+    "draft_accepted": 448,
+    "acceptance_rate": 0.725
+  }
+]

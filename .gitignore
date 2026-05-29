@@ -9,3 +9,32 @@ test_results*
 logs/
 
 bench_logs*
+
+_diagnostics/
+
+*.gguf
+
+# Test and diagnostic scripts
+_test_*.py
+_diagnose_*.py
+_gen_*.py
+
+# Internal workspace
+_workspace/
+
+# IDE config
+.trae/
+
+# MTP training artifacts (large, not for repo)
+mtp_heads_*/
+
+# Duplicate/intermediate results
+results/
+
+# Old experiment scripts (superseded by run_exp456.py)
+run_exp3_mtp.py
+run_exp3_patched.py
+run_specdec_experiments.py
+run_specdec_llamacpp.py
+train_mtp_heads.py
+train_mtp_real.py

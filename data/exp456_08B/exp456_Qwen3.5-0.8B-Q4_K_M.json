@@ -1,0 +1,76 @@
+{
+  "exp6": [
+    {
+      "run_id": 0,
+      "drafter": "ngram_n3_k1",
+      "ngram_size": 3,
+      "num_pred": 1,
+      "wall_clock_s": 2.89,
+      "gen_tokens": 661,
+      "tok_per_s": 284.1,
+      "draft_proposed": 619,
+      "draft_accepted": 562,
+      "acceptance_rate": 0.908
+    },
+    {
+      "run_id": 0,
+      "drafter": "ngram_n3_k2",
+      "ngram_size": 3,
+      "num_pred": 2,
+      "wall_clock_s": 2.878,
+      "gen_tokens": 661,
+      "tok_per_s": 285.0,
+      "draft_proposed": 619,
+      "draft_accepted": 562,
+      "acceptance_rate": 0.908
+    },
+    {
+      "run_id": 0,
+      "drafter": "ngram_n3_k3",
+      "ngram_size": 3,
+      "num_pred": 3,
+      "wall_clock_s": 2.887,
+      "gen_tokens": 661,
+      "tok_per_s": 283.9,
+      "draft_proposed": 619,
+      "draft_accepted": 562,
+      "acceptance_rate": 0.908
+    },
+    {
+      "run_id": 0,
+      "drafter": "ngram_n3_k5",
+      "ngram_size": 3,
+      "num_pred": 5,
+      "wall_clock_s": 2.882,
+      "gen_tokens": 661,
+      "tok_per_s": 286.2,
+      "draft_proposed": 619,
+      "draft_accepted": 562,
+      "acceptance_rate": 0.908
+    },
+    {
+      "run_id": 0,
+      "drafter": "ngram_n2_k3",
+      "ngram_size": 2,
+      "num_pred": 3,
+      "wall_clock_s": 2.867,
+      "gen_tokens": 661,
+      "tok_per_s": 284.3,
+      "draft_proposed": 641,
+      "draft_accepted": 550,
+      "acceptance_rate": 0.858
+    },
+    {
+      "run_id": 0,
+      "drafter": "ngram_n4_k3",
+      "ngram_size": 4,
+      "num_pred": 3,
+      "wall_clock_s": 2.87,
+      "gen_tokens": 661,
+      "tok_per_s": 283.6,
+      "draft_proposed": 599,
+      "draft_accepted": 563,
+      "acceptance_rate": 0.94
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "run_id": 2,
+  "model": "Qwen3.5-4B-Q4_K_M",
+  "mode": "AppLoop+SpecDec",
+  "wall_clock_s": 15.806,
+  "gen_time_s": 15.722,
+  "gen_tokens": 898,
+  "prefill_tokens": 45898,
+  "tok_per_s": 57.1,
+  "vram_peak_mb": 5005.2421875,
+  "completion_count": 35,
+  "failure_count": 0,
+  "output_hash": "4f53cda18c2baa0c"
+}
