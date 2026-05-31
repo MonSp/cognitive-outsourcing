@@ -38,3 +38,11 @@ run_specdec_experiments.py
 run_specdec_llamacpp.py
 train_mtp_heads.py
 train_mtp_real.py
+
+# llama.cpp source clone and pre-built binaries
+llama.cpp/
+llama-cpp-bin/
+
+# One-time utility scripts
+patch_paper.py
+analyze_mtp_results.py

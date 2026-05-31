@@ -1,0 +1,374 @@
+{
+  "exp1": [
+    {
+      "run_id": 0,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.45,
+      "gen_time_s": 1.056,
+      "gen_tokens": 204,
+      "tok_per_s": 193.2,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG",
+      "wall_clock_s": 2.196,
+      "gen_time_s": 1.643,
+      "gen_tokens": 482,
+      "tok_per_s": 293.3,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 5.899,
+      "gen_time_s": 4.128,
+      "gen_tokens": 1129,
+      "tok_per_s": 273.5,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.701,
+      "gen_time_s": 2.173,
+      "gen_tokens": 639,
+      "tok_per_s": 294.1,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 1,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.287,
+      "gen_time_s": 1.05,
+      "gen_tokens": 204,
+      "tok_per_s": 194.2,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG",
+      "wall_clock_s": 2.185,
+      "gen_time_s": 1.659,
+      "gen_tokens": 482,
+      "tok_per_s": 290.5,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 5.892,
+      "gen_time_s": 4.13,
+      "gen_tokens": 1129,
+      "tok_per_s": 273.4,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.699,
+      "gen_time_s": 2.178,
+      "gen_tokens": 639,
+      "tok_per_s": 293.4,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 2,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.299,
+      "gen_time_s": 1.064,
+      "gen_tokens": 204,
+      "tok_per_s": 191.8,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG",
+      "wall_clock_s": 2.19,
+      "gen_time_s": 1.665,
+      "gen_tokens": 482,
+      "tok_per_s": 289.4,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 5.906,
+      "gen_time_s": 4.134,
+      "gen_tokens": 1129,
+      "tok_per_s": 273.1,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.7,
+      "gen_time_s": 2.173,
+      "gen_tokens": 639,
+      "tok_per_s": 294.1,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 3,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.298,
+      "gen_time_s": 1.059,
+      "gen_tokens": 204,
+      "tok_per_s": 192.6,
+      "completion_count": 35
+    },
+    {
+      "run_id": 3,
+      "mode": "SIG",
+      "wall_clock_s": 2.19,
+      "gen_time_s": 1.657,
+      "gen_tokens": 482,
+      "tok_per_s": 290.8,
+      "completion_count": 35
+    },
+    {
+      "run_id": 3,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 5.9,
+      "gen_time_s": 4.136,
+      "gen_tokens": 1129,
+      "tok_per_s": 273.0,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 3,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.699,
+      "gen_time_s": 2.203,
+      "gen_tokens": 639,
+      "tok_per_s": 290.1,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 4,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.457,
+      "gen_time_s": 1.211,
+      "gen_tokens": 204,
+      "tok_per_s": 168.4,
+      "completion_count": 35
+    },
+    {
+      "run_id": 4,
+      "mode": "SIG",
+      "wall_clock_s": 2.175,
+      "gen_time_s": 1.657,
+      "gen_tokens": 482,
+      "tok_per_s": 290.9,
+      "completion_count": 35
+    },
+    {
+      "run_id": 4,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 5.909,
+      "gen_time_s": 4.155,
+      "gen_tokens": 1129,
+      "tok_per_s": 271.7,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 4,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.688,
+      "gen_time_s": 2.182,
+      "gen_tokens": 639,
+      "tok_per_s": 292.8,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    }
+  ],
+  "exp1_orthogonality": {
+    "S_SIG": 1.078,
+    "S_SpecDec": 0.4,
+    "S_SIG+SpecDec": 0.874,
+    "rho": 2.027
+  },
+  "exp2": [
+    {
+      "run_id": 0,
+      "wall_clock_s": 2.68,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 1,
+      "wall_clock_s": 2.698,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 2,
+      "wall_clock_s": 2.695,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 3,
+      "wall_clock_s": 2.697,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 4,
+      "wall_clock_s": 2.75,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    }
+  ],
+  "exp3": [
+    {
+      "run_id": 0,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.339,
+      "gen_time_s": 1.069,
+      "gen_tokens": 204,
+      "tok_per_s": 190.9,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG",
+      "wall_clock_s": 2.203,
+      "gen_time_s": 1.694,
+      "gen_tokens": 482,
+      "tok_per_s": 284.6,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.727,
+      "gen_time_s": 2.208,
+      "gen_tokens": 639,
+      "tok_per_s": 289.4,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 1,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.35,
+      "gen_time_s": 1.059,
+      "gen_tokens": 204,
+      "tok_per_s": 192.6,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG",
+      "wall_clock_s": 2.24,
+      "gen_time_s": 1.696,
+      "gen_tokens": 482,
+      "tok_per_s": 284.2,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.718,
+      "gen_time_s": 2.205,
+      "gen_tokens": 639,
+      "tok_per_s": 289.7,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 2,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.324,
+      "gen_time_s": 1.061,
+      "gen_tokens": 204,
+      "tok_per_s": 192.3,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG",
+      "wall_clock_s": 2.272,
+      "gen_time_s": 1.703,
+      "gen_tokens": 482,
+      "tok_per_s": 283.1,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.73,
+      "gen_time_s": 2.213,
+      "gen_tokens": 639,
+      "tok_per_s": 288.8,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 3,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.298,
+      "gen_time_s": 1.055,
+      "gen_tokens": 204,
+      "tok_per_s": 193.4,
+      "completion_count": 35
+    },
+    {
+      "run_id": 3,
+      "mode": "SIG",
+      "wall_clock_s": 2.177,
+      "gen_time_s": 1.672,
+      "gen_tokens": 482,
+      "tok_per_s": 288.3,
+      "completion_count": 35
+    },
+    {
+      "run_id": 3,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.682,
+      "gen_time_s": 2.179,
+      "gen_tokens": 639,
+      "tok_per_s": 293.3,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 4,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.297,
+      "gen_time_s": 1.065,
+      "gen_tokens": 204,
+      "tok_per_s": 191.5,
+      "completion_count": 35
+    },
+    {
+      "run_id": 4,
+      "mode": "SIG",
+      "wall_clock_s": 2.169,
+      "gen_time_s": 1.658,
+      "gen_tokens": 482,
+      "tok_per_s": 290.7,
+      "completion_count": 35
+    },
+    {
+      "run_id": 4,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.684,
+      "gen_time_s": 2.19,
+      "gen_tokens": 639,
+      "tok_per_s": 291.7,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    }
+  ]
+}

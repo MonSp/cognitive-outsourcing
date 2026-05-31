@@ -50,13 +50,14 @@ class ManualSpecDecCompiler:
     """Manual speculative decoding using eval() + sample().
 
     Uses n-gram drafting + sequential verification. Each verification
-    step only processes 1 token (via eval), so the overhead is minimal.
+    step only processes 1 token (via eval).
 
-    Architecture:
-    - Target model: llama-cpp-python Llama instance
-    - Drafter: NgramDrafter (zero VRAM overhead)
-    - Verification: sequential — sample target token, compare with draft,
-      eval accepted token, repeat
+    Note: Sequential verification has the same per-token cost as normal
+    generation (1 forward pass per token). True speedup requires parallel
+    verification (eval K tokens in 1 forward pass), which needs
+    logits_all=True + kv_cache_seq_rm support. On Qwen3.5, both
+    logits_all=True (sample(idx=...) crashes) and kv_cache_seq_rm
+    (partial deletion fails) are broken due to hybrid attention.
     """
 
     def __init__(self, model_path: str, n_ctx: int = 16384,

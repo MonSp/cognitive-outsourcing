@@ -1,0 +1,230 @@
+{
+  "exp1": [
+    {
+      "run_id": 0,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.484,
+      "gen_time_s": 1.105,
+      "gen_tokens": 204,
+      "tok_per_s": 184.7,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG",
+      "wall_clock_s": 2.25,
+      "gen_time_s": 1.686,
+      "gen_tokens": 482,
+      "tok_per_s": 285.9,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 6.029,
+      "gen_time_s": 4.23,
+      "gen_tokens": 1129,
+      "tok_per_s": 266.9,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.772,
+      "gen_time_s": 2.227,
+      "gen_tokens": 639,
+      "tok_per_s": 286.9,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 1,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.348,
+      "gen_time_s": 1.083,
+      "gen_tokens": 204,
+      "tok_per_s": 188.4,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG",
+      "wall_clock_s": 2.229,
+      "gen_time_s": 1.693,
+      "gen_tokens": 482,
+      "tok_per_s": 284.8,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 6.04,
+      "gen_time_s": 4.242,
+      "gen_tokens": 1129,
+      "tok_per_s": 266.2,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.761,
+      "gen_time_s": 2.226,
+      "gen_tokens": 639,
+      "tok_per_s": 287.1,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 2,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.341,
+      "gen_time_s": 1.067,
+      "gen_tokens": 204,
+      "tok_per_s": 191.2,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG",
+      "wall_clock_s": 2.227,
+      "gen_time_s": 1.7,
+      "gen_tokens": 482,
+      "tok_per_s": 283.6,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "AppLoop+SpecDec",
+      "wall_clock_s": 6.038,
+      "gen_time_s": 4.245,
+      "gen_tokens": 1129,
+      "tok_per_s": 266.0,
+      "completion_count": 35,
+      "acceptance_rate": 0.778
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.772,
+      "gen_time_s": 2.238,
+      "gen_tokens": 639,
+      "tok_per_s": 285.5,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    }
+  ],
+  "exp1_orthogonality": {
+    "S_SIG": 1.07,
+    "S_SpecDec": 0.396,
+    "S_SIG+SpecDec": 0.864,
+    "rho": 2.039
+  },
+  "exp2": [
+    {
+      "run_id": 0,
+      "wall_clock_s": 2.762,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 1,
+      "wall_clock_s": 2.771,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 2,
+      "wall_clock_s": 2.78,
+      "gen_tokens": 639,
+      "acceptance_rate": 0.881
+    }
+  ],
+  "exp3": [
+    {
+      "run_id": 0,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.342,
+      "gen_time_s": 1.08,
+      "gen_tokens": 204,
+      "tok_per_s": 188.9,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG",
+      "wall_clock_s": 2.239,
+      "gen_time_s": 1.705,
+      "gen_tokens": 482,
+      "tok_per_s": 282.6,
+      "completion_count": 35
+    },
+    {
+      "run_id": 0,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.767,
+      "gen_time_s": 2.225,
+      "gen_tokens": 639,
+      "tok_per_s": 287.3,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 1,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.342,
+      "gen_time_s": 1.079,
+      "gen_tokens": 204,
+      "tok_per_s": 189.1,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG",
+      "wall_clock_s": 2.231,
+      "gen_time_s": 1.701,
+      "gen_tokens": 482,
+      "tok_per_s": 283.4,
+      "completion_count": 35
+    },
+    {
+      "run_id": 1,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.752,
+      "gen_time_s": 2.228,
+      "gen_tokens": 639,
+      "tok_per_s": 286.8,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    },
+    {
+      "run_id": 2,
+      "mode": "AppLoop",
+      "wall_clock_s": 2.34,
+      "gen_time_s": 1.079,
+      "gen_tokens": 204,
+      "tok_per_s": 189.1,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG",
+      "wall_clock_s": 2.228,
+      "gen_time_s": 1.704,
+      "gen_tokens": 482,
+      "tok_per_s": 282.8,
+      "completion_count": 35
+    },
+    {
+      "run_id": 2,
+      "mode": "SIG+SpecDec",
+      "wall_clock_s": 2.767,
+      "gen_time_s": 2.232,
+      "gen_tokens": 639,
+      "tok_per_s": 286.3,
+      "completion_count": 35,
+      "acceptance_rate": 0.881
+    }
+  ]
+}
