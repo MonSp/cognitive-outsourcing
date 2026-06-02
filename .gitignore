@@ -46,3 +46,14 @@ llama-cpp-bin/
 # One-time utility scripts
 patch_paper.py
 analyze_mtp_results.py
+
+# Vendored Python libraries (large, not for repo)
+lib/
+libs/
+st_lib/
+
+# Large archive files
+*.zip
+
+# Smoke test intermediate results
+data/exp_mtp_full_v2_smoke*.json

@@ -322,3 +322,46 @@ def compute_cache_efficiency(metrics: Dict) -> Dict:
         "tokens_per_injection": round(injected / max(inject_count, 1), 1),
         "compute_per_token_ms": round(1000 * total_compute / max(injected + generated, 1), 2),
     }
+
+
+def token_jaccard_similarity(text_a: str, text_b: str, min_len: int = 3) -> float:
+    """Token-level Jaccard similarity between two texts.
+
+    Tokenizes both texts into word sets (words with length >= min_len),
+    then computes |intersection| / |union|.
+    """
+    set_a = {w for w in text_a.lower().split() if len(w) >= min_len}
+    set_b = {w for w in text_b.lower().split() if len(w) >= min_len}
+    if not set_a and not set_b:
+        return 1.0
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / len(set_a | set_b)
+
+
+def semantic_similarity(text_a: str, text_b: str, model_name: str = "all-MiniLM-L6-v2") -> float:
+    """Compute cosine similarity between sentence embeddings of two texts.
+
+    Uses sentence-transformers to encode both texts and returns their
+    cosine similarity in [-1, 1]. Falls back to Token-Jaccard when
+    sentence-transformers is unavailable.
+    """
+    try:
+        import sys
+        import os
+        _st_lib = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "st_lib")
+        if _st_lib not in sys.path:
+            sys.path.insert(0, _st_lib)
+        from sentence_transformers import SentenceTransformer
+        import numpy as np
+        model = SentenceTransformer(model_name)
+        embeddings = model.encode([text_a, text_b], convert_to_numpy=True)
+        a = embeddings[0]
+        b = embeddings[1]
+        norm_a = np.linalg.norm(a)
+        norm_b = np.linalg.norm(b)
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return float(np.dot(a, b) / (norm_a * norm_b))
+    except Exception:
+        return token_jaccard_similarity(text_a, text_b)

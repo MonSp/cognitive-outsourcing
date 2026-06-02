@@ -42,6 +42,8 @@ from .metrics import (
     token_rank_metric,
     mean_std,
     compute_cache_efficiency,
+    token_jaccard_similarity,
+    semantic_similarity,
 )
 from .info_theory import (
     kl_divergence,
