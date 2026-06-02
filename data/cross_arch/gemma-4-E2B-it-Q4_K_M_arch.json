@@ -1,0 +1,26 @@
+{
+  "model_path": "models/gemma-4-E2B-it-Q4_K_M.gguf",
+  "architecture": {
+    "family": "gemma-4",
+    "arch_type": "gemma4",
+    "kind": "dense_attention_swa_shared",
+    "gqa": 4,
+    "swa": true,
+    "shared_kv_layers": true,
+    "is_draft_model": false,
+    "requires_target_arch": null,
+    "n_head": null,
+    "n_kv_head": null,
+    "block_count": null,
+    "embedding_length": null,
+    "feed_forward_length": null,
+    "head_count": null,
+    "head_count_kv": null,
+    "context_length": null,
+    "sliding_window_pattern": null,
+    "notes": "gemma4 architecture: SWA layers interleaved with global attention, plus shared_kv_layers (a subset of layers share KV cache). GeGLU + pre-norm + GQA. Partial-deletion semantics may diverge across SWA window boundaries and shared layers — SpecDec compatibility should be cross-checked with the actual shared_kv_layers metadata value.",
+    "source": "filename_hint",
+    "gqa_ratio": 4
+  },
+  "timestamp": "2026-06-02 14:32:41"
+}

@@ -1,0 +1,95 @@
+{
+  "model_path": "models/gemma-4-E2B-it-Q4_K_M.gguf",
+  "architecture": {
+    "family": "gemma-4",
+    "arch_type": "gemma4",
+    "kind": "dense_attention_swa_shared",
+    "gqa": 4,
+    "swa": true,
+    "shared_kv_layers": true,
+    "is_draft_model": false,
+    "requires_target_arch": null,
+    "n_head": null,
+    "n_kv_head": null,
+    "block_count": null,
+    "embedding_length": null,
+    "feed_forward_length": null,
+    "head_count": null,
+    "head_count_kv": null,
+    "context_length": null,
+    "sliding_window_pattern": null,
+    "notes": "gemma4 architecture: SWA layers interleaved with global attention, plus shared_kv_layers (a subset of layers share KV cache). GeGLU + pre-norm + GQA. Partial-deletion semantics may diverge across SWA window boundaries and shared layers — SpecDec compatibility should be cross-checked with the actual shared_kv_layers metadata value.",
+    "source": "filename_hint",
+    "gqa_ratio": 4
+  },
+  "task": "r6",
+  "config": {
+    "tool_depth": 30,
+    "failure_rate": 0.15,
+    "n_runs": 10,
+    "base_seed": 42
+  },
+  "summary": {
+    "SIG": {
+      "mean_s": 0.3542407751083374,
+      "std_s": 0.012663079566481546,
+      "n": 10,
+      "vs_sig": 1.0,
+      "vs_apploop": 3.1958406736871576
+    },
+    "AppLoop": {
+      "mean_s": 1.13209707736969,
+      "std_s": 0.030048915829522297,
+      "n": 10,
+      "vs_sig": 0.3129067128513211,
+      "vs_apploop": 1.0
+    },
+    "AppLoop-PC": {
+      "mean_s": 1.1289228677749634,
+      "std_s": 0.021471768856805303,
+      "n": 10,
+      "vs_sig": 0.3137865174141825,
+      "vs_apploop": 1.002811715206888
+    }
+  },
+  "per_run": {
+    "sig_times": [
+      0.38800787925720215,
+      0.35194945335388184,
+      0.3541688919067383,
+      0.3490314483642578,
+      0.3454732894897461,
+      0.35257458686828613,
+      0.35443615913391113,
+      0.35335850715637207,
+      0.3528883457183838,
+      0.3405191898345947
+    ],
+    "apploop_times": [
+      1.1398584842681885,
+      1.1048123836517334,
+      1.1551239490509033,
+      1.1189794540405273,
+      1.1623268127441406,
+      1.1492030620574951,
+      1.1690621376037598,
+      1.0733425617218018,
+      1.1088411808013916,
+      1.139420747756958
+    ],
+    "apploop_pc_times": [
+      1.1456589698791504,
+      1.1188688278198242,
+      1.1207399368286133,
+      1.1462721824645996,
+      1.1419270038604736,
+      1.124190092086792,
+      1.1436488628387451,
+      1.0757215023040771,
+      1.1306967735290527,
+      1.1415045261383057
+    ]
+  },
+  "sig_exceptions": [],
+  "timestamp": "2026-06-02 14:33:07"
+}

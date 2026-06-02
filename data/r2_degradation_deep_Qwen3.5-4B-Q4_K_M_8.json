@@ -1,0 +1,219 @@
+{
+  "metadata": {
+    "model": "models/Qwen3.5-4B-Q4_K_M.gguf",
+    "n_ctx": 16384,
+    "n_threads": 4,
+    "n_gpu_layers": 99,
+    "rounds": 8,
+    "probe_interval": 4,
+    "cities_used": [
+      "newyork",
+      "london",
+      "beijing",
+      "rome",
+      "tokyo",
+      "sydney",
+      "dubai",
+      "paris"
+    ],
+    "timestamp": 1780387490.5302832
+  },
+  "round_records": [
+    {
+      "round": 1,
+      "city": "paris",
+      "fact_key": "weather",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 1] City: Paris\n  - Partly cloudy, 18C\n  - Population: 2.2 million\n  - Landmark: Eiffel Tower\n  - Specialty: Croissants\n  - Language: French\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 104,
+      "prefill_time_ms": 19.552946090698242,
+      "cache_tokens_after": 141,
+      "round_time_ms": 20.55668830871582,
+      "card_entropy_bits": 4.845352317734112
+    },
+    {
+      "round": 2,
+      "city": "tokyo",
+      "fact_key": "population",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 2] City: Tokyo\n  - Rain, 22C\n  - Population: 13.9 million\n  - Landmark: Tokyo Skytree\n  - Specialty: Sushi\n  - Language: Japanese\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 102,
+      "prefill_time_ms": 15.012979507446289,
+      "cache_tokens_after": 243,
+      "round_time_ms": 15.012979507446289,
+      "card_entropy_bits": 4.862277417544802
+    },
+    {
+      "round": 3,
+      "city": "rome",
+      "fact_key": "landmark",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 3] City: Rome\n  - Sunny, 26C\n  - Population: 2.8 million\n  - Landmark: Colosseum\n  - Specialty: Pizza al Taglio\n  - Language: Italian\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 104,
+      "prefill_time_ms": 35.861968994140625,
+      "cache_tokens_after": 347,
+      "round_time_ms": 35.861968994140625,
+      "card_entropy_bits": 4.81896266655111
+    },
+    {
+      "round": 4,
+      "city": "london",
+      "fact_key": "specialty",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 4] City: London\n  - Overcast, 15C\n  - Population: 8.9 million\n  - Landmark: Big Ben\n  - Specialty: Fish and Chips\n  - Language: English\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 103,
+      "prefill_time_ms": 18.166303634643555,
+      "cache_tokens_after": 450,
+      "round_time_ms": 18.166303634643555,
+      "card_entropy_bits": 4.8663074285235535
+    },
+    {
+      "round": 5,
+      "city": "newyork",
+      "fact_key": "language",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 5] City: Newyork\n  - Clear, 22C\n  - Population: 8.4 million\n  - Landmark: Statue of Liberty\n  - Specialty: Bagels\n  - Language: English\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 104,
+      "prefill_time_ms": 14.601469039916992,
+      "cache_tokens_after": 983,
+      "round_time_ms": 14.601469039916992,
+      "card_entropy_bits": 4.880524664254946
+    },
+    {
+      "round": 6,
+      "city": "sydney",
+      "fact_key": "weather",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 6] City: Sydney\n  - Sunny, 24C\n  - Population: 5.3 million\n  - Landmark: Opera House\n  - Specialty: Pavlova\n  - Language: English\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 102,
+      "prefill_time_ms": 39.39104080200195,
+      "cache_tokens_after": 1085,
+      "round_time_ms": 39.39104080200195,
+      "card_entropy_bits": 4.878612929761879
+    },
+    {
+      "round": 7,
+      "city": "beijing",
+      "fact_key": "population",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 7] City: Beijing\n  - Smog, 28C\n  - Population: 21.5 million\n  - Landmark: Great Wall\n  - Specialty: Peking Duck\n  - Language: Mandarin\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 104,
+      "prefill_time_ms": 8.082151412963867,
+      "cache_tokens_after": 1189,
+      "round_time_ms": 8.596181869506836,
+      "card_entropy_bits": 4.891072068731519
+    },
+    {
+      "round": 8,
+      "city": "dubai",
+      "fact_key": "landmark",
+      "card_text": "<|im_start|>user\nHere is a city information card. Memorize all facts.\n[Round 8] City: Dubai\n  - Hot, 38C\n  - Population: 3.5 million\n  - Landmark: Burj Khalifa\n  - Specialty: Shawarma\n  - Language: Arabic\n<|im_end|>\n<|im_start|>assistant\nUnderstood, I have memorized the information.<|im_end|>",
+      "card_tokens": 103,
+      "prefill_time_ms": 24.789810180664062,
+      "cache_tokens_after": 1292,
+      "round_time_ms": 25.789737701416016,
+      "card_entropy_bits": 4.89741359277293
+    }
+  ],
+  "probe_records": [
+    {
+      "round": 4,
+      "cache_tokens": 879,
+      "short_term": {
+        "city": "rome",
+        "fact_key": "specialty",
+        "single_fact_score": 1.0,
+        "card_aggregate_score": 0.9,
+        "response": "The specialty of London is **Fish and Chips**.user"
+      },
+      "long_term": {
+        "city": "paris",
+        "fact_key_primary": "weather",
+        "fact_key_alt": "landmark",
+        "primary_score": 0.6666666666666666,
+        "alt_score": 1.0,
+        "card_aggregate_score": 0.9333333333333332,
+        "primary_response": "The weather in Paris is **partly cloudy** with a temperature of **18°C**.user",
+        "alt_response": "The landmark in Paris is the **Eiffel Tower**.",
+        "per_fact_scores": {
+          "weather": 0.6666666666666666,
+          "population": 1.0,
+          "landmark": 1.0,
+          "specialty": 1.0,
+          "language": 1.0
+        }
+      },
+      "probe_time_ms": 386.3053321838379
+    },
+    {
+      "round": 8,
+      "cache_tokens": 1721,
+      "short_term": {
+        "city": "beijing",
+        "fact_key": "landmark",
+        "single_fact_score": 1.0,
+        "card_aggregate_score": 0.9,
+        "response": "The landmark in Dubai is the **Burj Khalifa**."
+      },
+      "long_term": {
+        "city": "paris",
+        "fact_key_primary": "weather",
+        "fact_key_alt": "landmark",
+        "primary_score": 0.6666666666666666,
+        "alt_score": 1.0,
+        "card_aggregate_score": 0.9333333333333332,
+        "primary_response": "The weather in Paris is **partly cloudy** with a temperature of **18°C**.",
+        "alt_response": "The landmark in Paris is the **Eiffel Tower**.",
+        "per_fact_scores": {
+          "weather": 0.6666666666666666,
+          "population": 1.0,
+          "landmark": 1.0,
+          "specialty": 1.0,
+          "language": 1.0
+        }
+      },
+      "probe_time_ms": 358.44993591308594
+    }
+  ],
+  "fits": {
+    "short_term": {
+      "H1": null,
+      "H2": null,
+      "H3": null
+    },
+    "long_term": {
+      "H1": null,
+      "H2": null,
+      "H3": null
+    },
+    "long_term_primary": {
+      "H1": null,
+      "H2": null,
+      "H3": null
+    }
+  },
+  "best_model": {
+    "short_term": "none",
+    "long_term": "none",
+    "long_term_primary": "none"
+  },
+  "summary": {
+    "n_probe_points": 2,
+    "short_term": {
+      "mean": 0.9,
+      "std": 0.0,
+      "min": 0.9,
+      "max": 0.9
+    },
+    "long_term": {
+      "mean": 0.9333333333333332,
+      "std": 0.0,
+      "min": 0.9333333333333332,
+      "max": 0.9333333333333332
+    },
+    "long_term_primary": {
+      "mean": 0.6666666666666666,
+      "std": 0.0,
+      "min": 0.6666666666666666,
+      "max": 0.6666666666666666
+    },
+    "cache_tokens": {
+      "mean": 1300.0,
+      "std": 595.383909759073,
+      "final": 1721.0
+    }
+  }
+}

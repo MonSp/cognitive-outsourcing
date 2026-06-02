@@ -1,0 +1,434 @@
+{
+  "metadata": {
+    "experiment": "exp_mtp_gemma4_assistant",
+    "version": "1.0",
+    "target_model_path": "models\\gemma-4-E2B-it-Q4_K_M.gguf",
+    "draft_model_path": "models\\gemma-4-E2B-it-assistant.Q4_K_M.gguf",
+    "target_model_available": true,
+    "draft_model_available": true,
+    "llama_server_available": true,
+    "llama_server_path": "llama-cpp-bin\\llama-server.exe",
+    "n_runs_per_cell": 10,
+    "context_lengths": [
+      30,
+      500,
+      1000,
+      2000
+    ],
+    "mode_specs": [
+      {
+        "mode": "no_mtp",
+        "spec_type": "none",
+        "spec_draft_n_max": 0,
+        "use_draft": false
+      },
+      {
+        "mode": "mtp_n1",
+        "spec_type": "draft-mtp",
+        "spec_draft_n_max": 1,
+        "use_draft": true
+      },
+      {
+        "mode": "mtp_n2",
+        "spec_type": "draft-mtp",
+        "spec_draft_n_max": 2,
+        "use_draft": true
+      },
+      {
+        "mode": "mtp_n3",
+        "spec_type": "draft-mtp",
+        "spec_draft_n_max": 3,
+        "use_draft": true
+      }
+    ],
+    "n_ctx": 16384,
+    "n_gpu_layers": 99,
+    "temperature": 0.0,
+    "max_new_tokens": 64,
+    "sig_simulation_mode": "client_side_token_passthrough",
+    "skipped_due_to_no_llama_server": false,
+    "skip_reason": ""
+  },
+  "per_cell_detail": {
+    "no_mtp": {
+      "30": [
+        {
+          "mode": "no_mtp",
+          "context_length": 30,
+          "run_id": 0,
+          "wall_clock_s": 0.34494781494140625,
+          "gen_tokens": 64,
+          "prompt_tokens": 85,
+          "tok_per_s": 185.5353106407449,
+          "acceptance_rate": 0.0,
+          "draft_proposed": 0,
+          "draft_accepted": 0,
+          "spec_type": "none",
+          "spec_draft_n_max": 0,
+          "streaming_measured": true,
+          "error": "",
+          "skipped": false,
+          "skip_reason": ""
+        }
+      ],
+      "500": [],
+      "1000": [],
+      "2000": []
+    },
+    "mtp_n1": {
+      "30": [],
+      "500": [],
+      "1000": [],
+      "2000": []
+    },
+    "mtp_n2": {
+      "30": [],
+      "500": [],
+      "1000": [],
+      "2000": []
+    },
+    "mtp_n3": {
+      "30": [],
+      "500": [],
+      "1000": [],
+      "2000": []
+    }
+  },
+  "per_cell_summary": {
+    "no_mtp": {
+      "30": {
+        "mode": "no_mtp",
+        "context_length": 30,
+        "n_runs": 1,
+        "mean_tok_per_s": 185.5353106407449,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.34494781494140625,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 64,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0,
+        "mean_draft_accepted": 0,
+        "skipped": false,
+        "skip_reason": ""
+      },
+      "500": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "1000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "2000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      }
+    },
+    "mtp_n1": {
+      "30": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "500": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "1000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "2000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      }
+    },
+    "mtp_n2": {
+      "30": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "500": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "1000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "2000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      }
+    },
+    "mtp_n3": {
+      "30": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "500": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "1000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      },
+      "2000": {
+        "mode": "?",
+        "context_length": 0,
+        "n_runs": 0,
+        "mean_tok_per_s": 0.0,
+        "std_tok_per_s": 0.0,
+        "mean_wall_clock_s": 0.0,
+        "std_wall_clock_s": 0.0,
+        "mean_gen_tokens": 0.0,
+        "mean_acceptance_rate": 0.0,
+        "mean_draft_proposed": 0.0,
+        "mean_draft_accepted": 0.0,
+        "skipped": true,
+        "skip_reason": ""
+      }
+    }
+  },
+  "mode_aggregate": {
+    "no_mtp": {
+      "n_runs_total": 1,
+      "n_runs_real": 1,
+      "mean_tok_per_s": 185.5353106407449,
+      "std_tok_per_s": 0.0,
+      "mean_wall_clock_s": 0.34494781494140625,
+      "std_wall_clock_s": 0.0,
+      "mean_acceptance_rate": 0.0,
+      "mean_draft_proposed": 0.0,
+      "mean_draft_accepted": 0.0
+    },
+    "mtp_n1": {
+      "n_runs_total": 0,
+      "n_runs_real": 0,
+      "mean_tok_per_s": 0.0,
+      "std_tok_per_s": 0.0,
+      "mean_wall_clock_s": 0.0,
+      "std_wall_clock_s": 0.0,
+      "mean_acceptance_rate": 0.0,
+      "mean_draft_proposed": 0.0,
+      "mean_draft_accepted": 0.0
+    },
+    "mtp_n2": {
+      "n_runs_total": 0,
+      "n_runs_real": 0,
+      "mean_tok_per_s": 0.0,
+      "std_tok_per_s": 0.0,
+      "mean_wall_clock_s": 0.0,
+      "std_wall_clock_s": 0.0,
+      "mean_acceptance_rate": 0.0,
+      "mean_draft_proposed": 0.0,
+      "mean_draft_accepted": 0.0
+    },
+    "mtp_n3": {
+      "n_runs_total": 0,
+      "n_runs_real": 0,
+      "mean_tok_per_s": 0.0,
+      "std_tok_per_s": 0.0,
+      "mean_wall_clock_s": 0.0,
+      "std_wall_clock_s": 0.0,
+      "mean_acceptance_rate": 0.0,
+      "mean_draft_proposed": 0.0,
+      "mean_draft_accepted": 0.0
+    }
+  },
+  "orthogonality_test": {
+    "sig_simulation_mode": "client_side_token_passthrough",
+    "notes": "SIG effect is approximated by sending a pre-tokenized prefix via prompt_tokens. MTP runs over the same prefix on the server side. Real KV-cache slot reuse is not exercised.",
+    "reason": "one_or_both_modes_skipped",
+    "sig_only_skipped": null,
+    "sig_mtp_skipped": null
+  },
+  "specdec_compatibility": {
+    "probe_lengths": [
+      30,
+      2000,
+      8000
+    ],
+    "n_runs_per_probe": 10,
+    "results": []
+  },
+  "end_to_end_chat": {
+    "turns_script": [
+      {
+        "turn_id": 0,
+        "prompt": "Hi, I need a 3-step plan to write a SIG benchmark report.",
+        "max_new_tokens": 80
+      },
+      {
+        "turn_id": 1,
+        "prompt": "Actually make it 4 steps and emphasize reproducibility.",
+        "max_new_tokens": 80
+      },
+      {
+        "turn_id": 2,
+        "prompt": "Now give a 2-sentence summary I can paste into the abstract.",
+        "max_new_tokens": 60
+      },
+      {
+        "turn_id": 3,
+        "prompt": "Thanks. Finally, list 3 risks I should mitigate.",
+        "max_new_tokens": 60
+      }
+    ],
+    "results": []
+  }
+}
