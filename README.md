@@ -14,7 +14,7 @@ Cognitive Outsourcing (CO) is an edge-AI architecture that empowers lightweight 
 | 2 | [Beyond the Injection Engine](paper/Beyond_the_Injection_Engine_A_Five_Dimensional_Analysis_of_CO-SIG.md) | Theory (R1–R5): attention shift, cache lifecycle, capability gap | Per-token rate equivalence ±2%, attention head agreement 0.25→0.43, no cache degradation at 64 rounds / 13.6K tokens across 3 model families | ✅ |
 | 3 | [CO-SIG Architecture & Design Space](paper/CO_SIG_Architecture_Theory_Empirical_Design_Space_for_Scalable_Edge_Intelligence.md) | Boundaries (R6–R14), cross-architecture, Batch-SIG | 2.79–5.26× deep-chain speedup, Batch-SIG 4.24–6.82× (architecture-independent), SIG Decision Framework | ✅ |
 | 4 | [SIG as Edge Runtime Primitive](paper/Suspend-and-Inject%20Generation%20as%20an%20Edge%20Inference%20Runtime%20Primitive%20for%20Long-Horizon%20Agent%20Tasks.md) | Deployment (R15–R19), Kitchen benchmark | 2.54× wall-clock speedup, prefill crossover ~1.5–2B, per-token rate 108 vs 103 tok/s | ✅ |
-| **5** | [**Orthogonal Acceleration**](paper/5_Orthogonal_Acceleration/paper.md) | **CO + MTP compound acceleration** | **SIG 2.92×, native MTP 1.27×, SIG+MTP compound validated, Gemma-4 3.20× cross-arch** | **🔄 Round 5** |
+| **5** | [**Orthogonal Acceleration**](paper/5_Orthogonal_Acceleration/paper.md) | **CO + MTP compound acceleration** | **SIG 3.50×, native MTP 1.27×, SIG+MTP 4.52× compound, ρ = 1.239 (Kitchen)** | **✅ Round 6** |
 
 ## Core Findings Across the Program
 
@@ -55,7 +55,18 @@ After SIG eliminates the prefill bottleneck, generation time dominates 76% of re
 | SIG+SpecDec (sequential) | 2.17× | — |
 | Acceptance rate under SIG | **72.5%** | **88.1%** |
 | Acceptance rate under AppLoop | 66.9% | 77.8% |
-| Orthogonality ratio ρ | **0.851** ✅ | 2.027 |
+| Orthogonality ratio ρ (sequential) | **0.851** ✅ | 2.027 |
+
+**Kitchen Benchmark: Native MTP Parallel Verification (EXP-7, n=5, 35 turns)**
+
+| Condition | Wall-clock (s) | tok/s | Speedup |
+|-----------|---------------|-------|---------|
+| AppLoop | 142.89 | 107.6 | 1.00× |
+| SIG | 40.79 | 104.1 | **3.50×** |
+| AppLoop+MTP | 137.03 | 137.0 | 1.04× |
+| SIG+MTP | 31.58 | 135.7 | **4.52×** |
+
+**ρ = 1.239** (PASS, near-multiplicative with slight super-multiplicative tendency from SIG cache persistence boosting MTP acceptance)
 
 **Native MTP SpecDec (parallel verification, Qwen3.5-4B)**
 
@@ -101,7 +112,7 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 ```
 ├── paper/                              # All five papers
 │   ├── 5_Orthogonal_Acceleration/      # Paper 5 (latest)
-│   │   ├── paper.md                    # Full paper (Round 5)
+│   │   ├── paper.md                    # Full paper (Round 6)
 │   │   └── figures/                    # All figures
 │   ├── Cognitive Outsourcing...md      # Paper 1: CO architecture
 │   ├── Beyond_the_Injection_Engine.md  # Paper 2: Theory (R1–R5)
@@ -122,7 +133,8 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 │   ├── r1_multiprompt_results.json    # R1 multi-prompt attention analysis
 │   ├── exp_specdec_gemma4.json        # Gemma-4 SpecDec compatibility
 │   ├── exp_mtp_4B_results.json         # MTP baseline (v1)
-│   └── exp_mtp_v2_results.json         # MTP + SIG+MTP (v2)
+│   ├── exp_mtp_v2_results.json         # MTP + SIG+MTP (v2)
+│   └── exp_mtp_kitchen_4B.json         # Kitchen 4-condition benchmark (EXP-7)
 ├── core/                               # CO/SIG inference engine
 │   ├── compiler.py                     # KV-cache management (rm/cp/keep/shift)
 │   ├── injection.py                    # Injection engine
@@ -140,7 +152,7 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 ├── cross_arch_sig_bench.py             # Cross-architecture SIG benchmark
 ├── exp_specdec_gemma4.py              # Gemma-4 SpecDec compatibility tests
 ├── exp_mtp_gemma4_assistant.py         # Gemma-4 MTP experiment (BLOCKED)
-├── exp_mtp_full_v2.py                  # Qwen3.5-4B MTP full experiment (n=10)
+├── exp_mtp_full_v2.py                  # Qwen3.5-4B MTP full experiment + Kitchen benchmark (--task kitchen)
 ├── r4_teacher_scan.py                  # R4 teacher-size scan
 ├── exp_mtp_v2.py                       # MTP benchmark + SIG+MTP (v2, main)
 ├── exp_mtp_native.py                   # Native MTP via llama-server
@@ -173,6 +185,9 @@ python edge_agent_bench.py --model models/Qwen3.5-4B-Q4_K_M.gguf
 
 # Run MTP benchmark (Paper 5, native llama-server required)
 python exp_mtp_v2.py
+
+# Run Kitchen 4-condition benchmark (Paper 5, EXP-7)
+python exp_mtp_full_v2.py --task kitchen --model models/Qwen3.5-4B-Q4_K_M.gguf --mtp-model models/mtp/Qwen3.5-4B-Q4_K_M.gguf --n-runs 5
 
 # Run cross-architecture benchmark (Paper 3)
 python cross_arch_bench.py

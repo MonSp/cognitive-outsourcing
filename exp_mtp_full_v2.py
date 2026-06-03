@@ -22,6 +22,7 @@ import argparse
 import json
 import math
 import os
+import random
 import shutil
 import signal
 import statistics
@@ -65,6 +66,66 @@ SIG_CHAT_TURNS: List[Tuple[str, int]] = [
     ("Thanks. Finally, list 3 risks I should mitigate.", 60),
 ]
 
+# ── EdgeAgent-Kitchen scenario (unified protocol with Paper5 Section 5.1-5.6) ──
+
+KITCHEN_SYSTEM_PROMPT = """You are an intelligent kitchen assistant running on an edge device.
+You help users with recipe planning, real-time cooking guidance, inventory management,
+and handling interruptions. Always consider dietary profile and kitchen state.
+Be concise and specific."""
+
+# Simplified Kitchen scenario for llama-server benchmarking.
+# Each tuple: (user_query, tool_name, tool_response_text)
+# We pre-compute tool responses to avoid needing the full KitchenToolRegistry.
+KITCHEN_SCENARIO_TURNS: List[Tuple[str, str, str]] = [
+    # (user_query, tool_name, tool_response)
+    ("Set family profile: 4 people, nut allergies, prefer Italian.", "set_user_profile",
+     "Profile: Family, allergies=nuts, diet=omnivore, servings=4, cuisine=italian"),
+    ("Stock pantry: pasta 600g.", "add_to_pantry", "Added 600g pasta to pantry (now 600g)"),
+    ("Stock pantry: rice 800g.", "add_to_pantry", "Added 800g rice to pantry (now 800g)"),
+    ("Stock pantry: olive_oil 500g.", "add_to_pantry", "Added 500g olive_oil to pantry (now 500g)"),
+    ("Stock fridge: chicken_breast 500g.", "add_to_fridge", "Added 500g chicken_breast to fridge (now 500g)"),
+    ("Stock fridge: eggs 300g.", "add_to_fridge", "Added 300g eggs to fridge (now 300g)"),
+    ("Plan Monday dinner: italian, under 45min.", "find_recipes",
+     "Found: spaghetti_bolognese (35min, 650cal), caprese_salad (10min, 280cal)"),
+    ("Get spaghetti bolognese recipe.", "get_recipe",
+     "Spaghetti Bolognese: pasta, beef, tomato, onion, garlic, olive_oil, oregano, salt, pepper, cheese_parmesan. Steps: Chop onion and garlic; Brown beef; Add tomato and oregano simmer 20min; Boil pasta 8min; Serve with parmesan. Time: 35min"),
+    ("Check ingredients for spaghetti_bolognese.", "check_ingredients",
+     "Missing: beef, cheese_parmesan. Have: pasta, onion, garlic, olive_oil, oregano, salt, pepper, tomato"),
+    ("Preheat oven to 180C.", "set_oven", "Oven set to 180C, preheating."),
+    ("Start cooking spaghetti_bolognese.", "start_cooking", "Started spaghetti_bolognese. Step 1: Chop onion and garlic"),
+    ("Next step?", "next_step", "Step 2: Brown beef in olive oil"),
+    ("Next step?", "next_step", "Step 3: Add tomato and oregano, simmer 20min"),
+    ("Set 15min timer for sauce.", "set_timer", "Timer set: 15 minutes for sauce"),
+    ("Check pantry.", "check_pantry", "Pantry: pasta 600g, rice 800g, olive_oil 500g, salt 300g, pepper 100g, oregano 50g, garlic 200g, onion 300g, tomato 500g, soy_sauce 300g, ginger 100g"),
+    ("Add beef to shopping list.", "add_shopping_item", "Added beef x2 to shopping list"),
+    ("Switch to Asian cuisine. Find recipes.", "find_recipes",
+     "Found: chicken_stir_fry (25min, 480cal, asian), salmon_teriyaki (20min, 520cal, asian)"),
+    ("Get chicken stir fry recipe.", "get_recipe",
+     "Chicken Stir Fry: chicken_breast, broccoli, bell_pepper, carrot, soy_sauce, ginger, garlic, rice, olive_oil. Steps: Slice chicken and vegetables; Heat oil in wok; Stir-fry chicken 5min; Add vegetables 3min; Add soy sauce and ginger; Serve over rice. Time: 25min"),
+    ("Check ingredients for chicken_stir_fry.", "check_ingredients",
+     "Missing: broccoli, bell_pepper, carrot. Have: chicken_breast, soy_sauce, ginger, garlic, rice, olive_oil"),
+    ("Substitute for cheese_parmesan?", "get_substitution", "Substitution for cheese_parmesan: almonds"),
+    ("Check fridge.", "check_fridge", "Fridge: chicken_breast 500g, eggs 300g, butter 200g, cheese_parmesan 200g, milk 500g"),
+    ("Nutrition for chicken_stir_fry?", "get_nutrition", "Nutrition for Chicken Stir Fry: 480 calories, allergens: soy"),
+    ("Plan Tuesday dinner: italian, under 30min.", "find_recipes",
+     "Found: caprese_salad (10min, 280cal, italian), omelette (8min, 320cal, french)"),
+    ("Start cooking chicken_stir_fry.", "start_cooking", "Started chicken_stir_fry. Step 1: Slice chicken and vegetables"),
+    ("Next step?", "next_step", "Step 2: Heat oil in wok"),
+    ("Next step?", "next_step", "Step 3: Stir-fry chicken 5min"),
+    ("Oven ready?", "get_oven_status", "Oven: 180C, ready"),
+    ("Compare prices: olive_oil, garlic, basil.", "compare_prices",
+     "Price comparison: olive_oil $5.00, garlic $0.20, basil $2.00"),
+    ("Show shopping list.", "get_shopping_list", "Shopping list: beef x2 ($12.00), broccoli x1 ($1.50), bell_pepper x1 ($1.50), carrot x1 ($1.00). Total: $16.00"),
+    ("Next step?", "next_step", "Step 4: Add vegetables 3min"),
+    ("Mother-in-law is vegetarian. What can we make?", "find_recipes",
+     "Found: vegetable_curry (40min, 420cal, indian, vegetarian), caprese_salad (10min, 280cal, italian, vegetarian)"),
+    ("Next step?", "next_step", "Step 5: Add soy sauce and ginger"),
+    ("Next step?", "next_step", "Step 6: Serve over rice"),
+    ("Get mushroom risotto recipe.", "get_recipe",
+     "Mushroom Risotto: rice, mushroom, onion, garlic, butter, cheese_parmesan, wine_white, olive_oil, salt, pepper. Steps: Saute onion and garlic in butter; Add rice toast 2min; Add wine stir until absorbed; Add broth gradually stirring 18min; Add mushrooms cook 5min; Finish with parmesan. Time: 35min"),
+    ("Nutrition for mushroom_risotto?", "get_nutrition", "Nutrition for Mushroom Risotto: 550 calories, allergens: dairy"),
+]
+
 
 # ── Data Classes ───────────────────────────────────────────────────
 
@@ -104,6 +165,10 @@ class ModeContextSummary:
     mean_draft_proposed: float
     mean_draft_accepted: float
     skipped: bool
+    ci_low_wall_clock_s: float = 0.0
+    ci_high_wall_clock_s: float = 0.0
+    ci_low_tok_per_s: float = 0.0
+    ci_high_tok_per_s: float = 0.0
     skip_reason: str = ""
 
 
@@ -130,6 +195,36 @@ class ChatEndToEndResult:
     mean_tok_per_s: float
     sum_gen_tokens: int
     turns: List[ChatTurnResult] = field(default_factory=list)
+    skipped: bool = False
+    skip_reason: str = ""
+
+
+@dataclass
+class KitchenTurnResult:
+    """One turn of the EdgeAgent-Kitchen benchmark."""
+    turn_id: int
+    condition: str  # "apploop", "sig", "apploop_mtp", "sig_mtp"
+    user_query: str
+    tool_name: str
+    prompt_tokens: int
+    gen_tokens: int
+    wall_clock_s: float
+    tok_per_s: float
+    prompt_eval_s: float  # time spent on prompt evaluation
+    acceptance_rate: float
+    draft_proposed: int
+    draft_accepted: int
+
+
+@dataclass
+class KitchenSessionResult:
+    """Full session result for one condition of the Kitchen benchmark."""
+    condition: str
+    n_turns: int
+    total_wall_clock_s: float
+    mean_tok_per_s: float
+    sum_gen_tokens: int
+    turns: List[KitchenTurnResult] = field(default_factory=list)
     skipped: bool = False
     skip_reason: str = ""
 
@@ -928,6 +1023,228 @@ def safe_std(xs: List[float]) -> float:
         return 0.0
 
 
+def bootstrap_ci(data: List[float], n_resamples: int = 10000, ci: float = 0.95) -> Tuple[float, float, float]:
+    """Bootstrap confidence interval for the mean.
+
+    Returns (mean, ci_low, ci_high).
+    """
+    if not data:
+        return 0.0, 0.0, 0.0
+    mean_val = statistics.mean(data)
+    if len(data) < 2:
+        return mean_val, mean_val, mean_val
+    resampled_means = []
+    for _ in range(n_resamples):
+        sample = random.choices(data, k=len(data))
+        resampled_means.append(statistics.mean(sample))
+    resampled_means.sort()
+    alpha = 1.0 - ci
+    lo_idx = int(math.floor((alpha / 2.0) * n_resamples))
+    hi_idx = int(math.floor((1.0 - alpha / 2.0) * n_resamples))
+    lo_idx = max(lo_idx, 0)
+    hi_idx = min(hi_idx, n_resamples - 1)
+    return mean_val, resampled_means[lo_idx], resampled_means[hi_idx]
+
+
+def cohens_d(group1: List[float], group2: List[float]) -> float:
+    """Pooled standard deviation Cohen's d.
+
+    d = (mean1 - mean2) / sqrt((var1 + var2) / 2)
+    Returns 0.0 if both groups have zero variance.
+    """
+    if not group1 or not group2:
+        return 0.0
+    mean1 = statistics.mean(group1)
+    mean2 = statistics.mean(group2)
+    var1 = statistics.variance(group1) if len(group1) >= 2 else 0.0
+    var2 = statistics.variance(group2) if len(group2) >= 2 else 0.0
+    pooled_var = (var1 + var2) / 2.0
+    if pooled_var == 0.0:
+        return 0.0
+    return (mean1 - mean2) / math.sqrt(pooled_var)
+
+
+def approximate_power(d: float, n: int, alpha: float = 0.05) -> float:
+    """Approximate statistical power for two-tailed t-test.
+
+    Uses non-centrality parameter: lambda = d * sqrt(n/2).
+    Power = 1 - beta where beta = CDF(t_critical - lambda).
+    Uses math.erf for approximate normal CDF.
+    """
+    if n < 2 or d == 0.0:
+        return 0.0
+    # t_critical for two-tailed test at alpha (approximate via normal)
+    z_alpha = _normal_ppf(1.0 - alpha / 2.0)
+    ncp = d * math.sqrt(n / 2.0)  # non-centrality parameter
+    beta = _normal_cdf(z_alpha - ncp) - _normal_cdf(-z_alpha - ncp)
+    power = 1.0 - beta
+    return max(0.0, min(1.0, power))
+
+
+def _normal_cdf(x: float) -> float:
+    """Standard normal CDF using math.erf."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _normal_ppf(p: float) -> float:
+    """Approximate inverse normal CDF (ppf) using rational approximation.
+
+    Abramowitz & Stegun approximation 26.2.23.
+    """
+    if p <= 0.0:
+        return -8.0
+    if p >= 1.0:
+        return 8.0
+    if p < 0.5:
+        return -_normal_ppf(1.0 - p)
+    # Rational approximation for 0.5 <= p < 1
+    t = math.sqrt(-2.0 * math.log(1.0 - p))
+    c0 = 2.515517
+    c1 = 0.802853
+    c2 = 0.010328
+    d1 = 1.432788
+    d2 = 0.189269
+    d3 = 0.001308
+    return t - (c0 + c1 * t + c2 * t * t) / (1.0 + d1 * t + d2 * t * t + d3 * t * t * t)
+
+
+def compute_statistical_analysis(runs: List[SingleRunResult]) -> Dict:
+    """Compute statistical analysis for one condition.
+
+    Filters to non-skipped runs with tok_per_s > 0.
+    Returns dict with mean, std, bootstrap_ci for key metrics.
+    """
+    real = [r for r in runs if not r.skipped and r.tok_per_s > 0]
+    result: Dict = {}
+
+    if not real:
+        result["n_valid_runs"] = 0
+        result["wall_clock"] = {"mean": 0.0, "std": 0.0, "ci_low": 0.0, "ci_high": 0.0}
+        result["tok_per_s"] = {"mean": 0.0, "std": 0.0, "ci_low": 0.0, "ci_high": 0.0}
+        result["acceptance_rate"] = {"mean": 0.0, "std": 0.0, "ci_low": 0.0, "ci_high": 0.0}
+        return result
+
+    result["n_valid_runs"] = len(real)
+
+    wall_vals = [r.wall_clock_s for r in real]
+    tps_vals = [r.tok_per_s for r in real]
+    ar_runs = [r for r in real if r.draft_proposed > 0]
+    ar_vals = [r.acceptance_rate for r in ar_runs]
+
+    wall_mean, wall_ci_lo, wall_ci_hi = bootstrap_ci(wall_vals)
+    tps_mean, tps_ci_lo, tps_ci_hi = bootstrap_ci(tps_vals)
+
+    result["wall_clock"] = {
+        "mean": wall_mean,
+        "std": safe_std(wall_vals),
+        "ci_low": wall_ci_lo,
+        "ci_high": wall_ci_hi,
+    }
+    result["tok_per_s"] = {
+        "mean": tps_mean,
+        "std": safe_std(tps_vals),
+        "ci_low": tps_ci_lo,
+        "ci_high": tps_ci_hi,
+    }
+
+    if ar_vals:
+        ar_mean, ar_ci_lo, ar_ci_hi = bootstrap_ci(ar_vals)
+        result["acceptance_rate"] = {
+            "mean": ar_mean,
+            "std": safe_std(ar_vals),
+            "ci_low": ar_ci_lo,
+            "ci_high": ar_ci_hi,
+        }
+    else:
+        result["acceptance_rate"] = {"mean": 0.0, "std": 0.0, "ci_low": 0.0, "ci_high": 0.0}
+
+    return result
+
+
+def compute_pairwise_comparison(
+    runs_a: List[SingleRunResult],
+    runs_b: List[SingleRunResult],
+    label_a: str,
+    label_b: str,
+) -> Dict:
+    """Compute Cohen's d and approximate power for wall_clock comparison."""
+    real_a = [r for r in runs_a if not r.skipped and r.tok_per_s > 0]
+    real_b = [r for r in runs_b if not r.skipped and r.tok_per_s > 0]
+    wall_a = [r.wall_clock_s for r in real_a]
+    wall_b = [r.wall_clock_s for r in real_b]
+
+    d = cohens_d(wall_a, wall_b)
+    n_min = min(len(wall_a), len(wall_b))
+    power = approximate_power(d, n_min) if n_min >= 2 else 0.0
+
+    return {
+        "label_a": label_a,
+        "label_b": label_b,
+        "cohens_d": d,
+        "power": power,
+        "n_a": len(wall_a),
+        "n_b": len(wall_b),
+        "mean_a": statistics.mean(wall_a) if wall_a else 0.0,
+        "mean_b": statistics.mean(wall_b) if wall_b else 0.0,
+    }
+
+
+def compute_orthogonality_ratio(
+    apploop_wall: float,
+    sig_wall: float,
+    apploop_mtp_wall: float,
+    sig_mtp_wall: float,
+) -> Dict:
+    """Compute orthogonality ratio ρ = S_SIG+MTP / (S_SIG × S_MTP).
+
+    Returns a dict with S_SIG, S_MTP, S_SIG+MTP, rho, and validity notes.
+    ρ is only meaningful when S_SIG > 1 and S_MTP > 1.
+    """
+    result: Dict = {
+        "apploop_wall_s": apploop_wall,
+        "sig_wall_s": sig_wall,
+        "apploop_mtp_wall_s": apploop_mtp_wall,
+        "sig_mtp_wall_s": sig_mtp_wall,
+    }
+
+    if apploop_wall <= 0 or sig_wall <= 0 or apploop_mtp_wall <= 0 or sig_mtp_wall <= 0:
+        result.update({"rho": None, "valid": False, "reason": "one_or_more_wall_clock_values_leq_zero"})
+        return result
+
+    s_sig = apploop_wall / sig_wall
+    s_mtp = apploop_wall / apploop_mtp_wall
+    s_sig_mtp = apploop_wall / sig_mtp_wall
+
+    result["S_SIG"] = round(s_sig, 4)
+    result["S_MTP"] = round(s_mtp, 4)
+    result["S_SIG_MTP"] = round(s_sig_mtp, 4)
+
+    if s_sig <= 1.0:
+        result.update({
+            "rho": None, "valid": False,
+            "reason": f"S_SIG = {s_sig:.3f} <= 1.0; SIG is not accelerating, rho not interpretable",
+        })
+        return result
+
+    if s_mtp <= 1.0:
+        result.update({
+            "rho": None, "valid": False,
+            "reason": f"S_MTP = {s_mtp:.3f} <= 1.0; MTP is harmful under AppLoop, rho > 1.0 would be a mathematical artifact, not super-multiplicative synergy",
+        })
+        return result
+
+    rho = s_sig_mtp / (s_sig * s_mtp)
+    result["rho"] = round(rho, 4)
+    result["valid"] = True
+    result["pass_085"] = rho >= 0.85
+    result["reason"] = (
+        f"rho = {rho:.3f} >= 0.85: PASS (near-multiplicative composition)"
+        if rho >= 0.85
+        else f"rho = {rho:.3f} < 0.85: sub-multiplicative (shared overhead or interference)"
+    )
+    return result
+
+
 def summarize_runs(runs: List[SingleRunResult]) -> ModeContextSummary:
     real = [r for r in runs if not r.skipped and r.tok_per_s > 0]
     skipped = all(r.skipped for r in runs)
@@ -945,21 +1262,33 @@ def summarize_runs(runs: List[SingleRunResult]) -> ModeContextSummary:
             mean_draft_proposed=0.0,
             mean_draft_accepted=0.0,
             skipped=skipped,
+            ci_low_wall_clock_s=0.0,
+            ci_high_wall_clock_s=0.0,
+            ci_low_tok_per_s=0.0,
+            ci_high_tok_per_s=0.0,
             skip_reason=(runs[0].skip_reason if runs and runs[0].skipped else ""),
         )
+    wall_vals = [r.wall_clock_s for r in real]
+    tps_vals = [r.tok_per_s for r in real]
+    _, wall_ci_lo, wall_ci_hi = bootstrap_ci(wall_vals)
+    _, tps_ci_lo, tps_ci_hi = bootstrap_ci(tps_vals)
     return ModeContextSummary(
         mode=runs[0].mode,
         context_length=runs[0].context_length,
         n_runs=len(runs),
         mean_tok_per_s=statistics.mean(r.tok_per_s for r in real),
-        std_tok_per_s=safe_std([r.tok_per_s for r in real]),
+        std_tok_per_s=safe_std(tps_vals),
         mean_wall_clock_s=statistics.mean(r.wall_clock_s for r in real),
-        std_wall_clock_s=safe_std([r.wall_clock_s for r in real]),
+        std_wall_clock_s=safe_std(wall_vals),
         mean_gen_tokens=statistics.mean(r.gen_tokens for r in real),
         mean_acceptance_rate=statistics.mean(r.acceptance_rate for r in real),
         mean_draft_proposed=statistics.mean(r.draft_proposed for r in real),
         mean_draft_accepted=statistics.mean(r.draft_accepted for r in real),
         skipped=False,
+        ci_low_wall_clock_s=wall_ci_lo,
+        ci_high_wall_clock_s=wall_ci_hi,
+        ci_low_tok_per_s=tps_ci_lo,
+        ci_high_tok_per_s=tps_ci_hi,
     )
 
 
@@ -1029,6 +1358,181 @@ def build_placeholder_chat(
     return out
 
 
+def run_kitchen_condition(
+    server_bin: Path,
+    model_path: str,
+    condition: str,  # "apploop", "sig", "apploop_mtp", "sig_mtp"
+    spec_type: str,
+    spec_draft_n_max: int,
+    n_runs: int,
+    base_port: int,
+    max_new_tokens: int = 60,
+) -> List[KitchenSessionResult]:
+    """Run EdgeAgent-Kitchen benchmark for one condition across n_runs.
+
+    SIG simulation: Send full message history each turn; llama-server's
+    prompt cache will reuse KV-cache from previous turns (only new tokens
+    are evaluated). This approximates SIG's KV-cache continuity.
+
+    AppLoop simulation: Restart the server between each turn, forcing
+    full re-encoding of the entire conversation each time.
+    """
+    all_sessions: List[KitchenSessionResult] = []
+
+    for run_id in range(n_runs):
+        print(f"\n  [kitchen condition={condition} run={run_id}] starting...")
+        is_sig = condition in ("sig", "sig_mtp")
+
+        server = LlamaServerMTP(
+            binary=server_bin,
+            model_path=model_path,
+            spec_type=spec_type,
+            spec_draft_n_max=spec_draft_n_max,
+            n_ctx=N_CTX,
+            n_gpu_layers=N_GPU_LAYERS,
+            port=base_port,
+        )
+
+        if not server.start():
+            all_sessions.append(KitchenSessionResult(
+                condition=condition,
+                n_turns=len(KITCHEN_SCENARIO_TURNS),
+                total_wall_clock_s=0.0,
+                mean_tok_per_s=0.0,
+                sum_gen_tokens=0,
+                skipped=True,
+                skip_reason="server_start_failed",
+            ))
+            continue
+
+        history: List[Dict[str, str]] = [
+            {"role": "system", "content": KITCHEN_SYSTEM_PROMPT}
+        ]
+        turn_results: List[KitchenTurnResult] = []
+        t_session0 = time.time()
+        sum_gen = 0
+        tok_s_acc: List[float] = []
+
+        try:
+            for tid, (user_query, tool_name, tool_response) in enumerate(KITCHEN_SCENARIO_TURNS):
+                # Build the prompt for this turn
+                if is_sig:
+                    # SIG: append to existing history (prompt cache reuse)
+                    history.append({"role": "user", "content": user_query})
+                else:
+                    # AppLoop: rebuild full history from scratch each turn
+                    history = [
+                        {"role": "system", "content": KITCHEN_SYSTEM_PROMPT}
+                    ]
+                    # Include all prior turns as context
+                    for prev_tid in range(tid):
+                        prev_query, prev_tool, prev_resp = KITCHEN_SCENARIO_TURNS[prev_tid]
+                        history.append({"role": "user", "content": prev_query})
+                        history.append({"role": "assistant",
+                                        "content": f"[Tool: {prev_tool}] {prev_resp}"})
+                    history.append({"role": "user", "content": user_query})
+
+                try:
+                    res = server.chat_streaming(
+                        history, max_tokens=max_new_tokens, temperature=TEMPERATURE
+                    )
+                    if res.get("error") or res.get("tokens_predicted", 0) == 0:
+                        res = server.chat(
+                            history, max_tokens=max_new_tokens, temperature=TEMPERATURE
+                        )
+
+                    ar = _normalize_ar(res.get("acceptance_rate", 0.0) or 0.0)
+                    if ar == 0 and res.get("draft_accepted", 0) and res.get("draft_proposed", 0):
+                        ar = res["draft_accepted"] / max(res.get("draft_proposed", 1), 1)
+                        ar = _normalize_ar(ar)
+
+                    # Extract prompt eval time from timings if available
+                    prompt_eval_s = 0.0
+                    raw = res.get("raw", {})
+                    if isinstance(raw, dict):
+                        timings = raw.get("timings", {})
+                        if isinstance(timings, dict):
+                            prompt_eval_s = float(timings.get("prompt_n", 0)) / max(
+                                float(timings.get("prompt_per_second", 1)), 1.0
+                            ) if timings.get("prompt_per_second") else 0.0
+                            # Alternative: prompt_eval_ms from timings
+                            if "prompt_eval_ms" in timings:
+                                prompt_eval_s = float(timings["prompt_eval_ms"]) / 1000.0
+
+                    assistant_text = res.get("text", "")
+                    if is_sig:
+                        history.append({"role": "assistant", "content": assistant_text})
+
+                    turn_results.append(KitchenTurnResult(
+                        turn_id=tid,
+                        condition=condition,
+                        user_query=user_query,
+                        tool_name=tool_name,
+                        prompt_tokens=res["tokens_evaluated"],
+                        gen_tokens=res["tokens_predicted"],
+                        wall_clock_s=res["wall_clock_s"],
+                        tok_per_s=res["tok_per_s"],
+                        prompt_eval_s=prompt_eval_s,
+                        acceptance_rate=ar,
+                        draft_proposed=int(res.get("draft_proposed", 0) or 0),
+                        draft_accepted=int(res.get("draft_accepted", 0) or 0),
+                    ))
+                    sum_gen += res["tokens_predicted"]
+                    if res["tok_per_s"] > 0:
+                        tok_s_acc.append(res["tok_per_s"])
+
+                except Exception as e:
+                    turn_results.append(KitchenTurnResult(
+                        turn_id=tid,
+                        condition=condition,
+                        user_query=user_query,
+                        tool_name=tool_name,
+                        prompt_tokens=0,
+                        gen_tokens=0,
+                        wall_clock_s=0.0,
+                        tok_per_s=0.0,
+                        prompt_eval_s=0.0,
+                        acceptance_rate=0.0,
+                        draft_proposed=0,
+                        draft_accepted=0,
+                    ))
+                    print(f"    [turn={tid}] ERROR: {e}")
+
+                # For AppLoop: restart server each turn to force full re-encoding
+                if not is_sig and tid < len(KITCHEN_SCENARIO_TURNS) - 1:
+                    server.stop()
+                    server = LlamaServerMTP(
+                        binary=server_bin,
+                        model_path=model_path,
+                        spec_type=spec_type,
+                        spec_draft_n_max=spec_draft_n_max,
+                        n_ctx=N_CTX,
+                        n_gpu_layers=N_GPU_LAYERS,
+                        port=base_port,
+                    )
+                    if not server.start():
+                        print(f"    [turn={tid}] Server restart failed")
+                        break
+
+        finally:
+            server.stop()
+
+        total_wall = time.time() - t_session0
+        mean_tps = statistics.mean(tok_s_acc) if tok_s_acc else 0.0
+        all_sessions.append(KitchenSessionResult(
+            condition=condition,
+            n_turns=len(KITCHEN_SCENARIO_TURNS),
+            total_wall_clock_s=total_wall,
+            mean_tok_per_s=mean_tps,
+            sum_gen_tokens=sum_gen,
+            turns=turn_results,
+        ))
+        print(f"  [kitchen condition={condition} run={run_id}] "
+              f"total={total_wall:.2f}s, gen={sum_gen} tok, {mean_tps:.1f} tok/s")
+
+    return all_sessions
+
+
 # ── JSON output assembly ───────────────────────────────────────────
 
 def build_output(
@@ -1041,6 +1545,7 @@ def build_output(
     llama_server_available: bool,
     llama_server_path: Optional[Path],
     model_available: bool,
+    kitchen_results: Optional[Dict[str, List[KitchenSessionResult]]] = None,
 ) -> Dict:
     # 1. Per-cell detail
     per_cell_detail: Dict[str, Dict[str, List[Dict]]] = {}
@@ -1103,6 +1608,79 @@ def build_output(
             "sig_mtp_skipped": sig_mtp.skipped if sig_mtp else None,
         }
 
+    # 5. Statistical analysis (bootstrap CI per mode, pairwise comparison)
+    statistical_analysis: Dict[str, Dict] = {}
+    for mode_label, _, _ in mode_specs:
+        mode_runs = [r for r in single_runs if r.mode == mode_label]
+        statistical_analysis[mode_label] = compute_statistical_analysis(mode_runs)
+
+    # Pairwise comparison: sig_only vs sig_mtp for end-to-end chat
+    sig_only_runs = [r for r in single_runs if r.mode == "sig_only"]
+    sig_mtp_runs = [r for r in single_runs if r.mode == "sig_mtp"]
+    pairwise = compute_pairwise_comparison(sig_only_runs, sig_mtp_runs, "sig_only", "sig_mtp")
+
+    # 6. Kitchen benchmark results
+    kitchen_section: Dict = {}
+    if kitchen_results:
+        kitchen_section["conditions"] = {}
+        for cond, sessions in kitchen_results.items():
+            real_sessions = [s for s in sessions if not s.skipped]
+            if real_sessions:
+                walls = [s.total_wall_clock_s for s in real_sessions]
+                tps = [s.mean_tok_per_s for s in real_sessions if s.mean_tok_per_s > 0]
+                gens = [s.sum_gen_tokens for s in real_sessions]
+                kitchen_section["conditions"][cond] = {
+                    "n_runs": len(sessions),
+                    "n_valid": len(real_sessions),
+                    "mean_wall_clock_s": statistics.mean(walls) if walls else 0.0,
+                    "std_wall_clock_s": safe_std(walls),
+                    "mean_tok_per_s": statistics.mean(tps) if tps else 0.0,
+                    "mean_gen_tokens": statistics.mean(gens) if gens else 0.0,
+                    "sessions": [asdict(s) for s in sessions],
+                }
+            else:
+                kitchen_section["conditions"][cond] = {
+                    "n_runs": len(sessions),
+                    "n_valid": 0,
+                    "sessions": [asdict(s) for s in sessions],
+                }
+
+        # Orthogonality analysis from kitchen results
+        ortho = {"source": "kitchen_benchmark"}
+        cond_means = {}
+        for cond, sessions in kitchen_results.items():
+            real = [s for s in sessions if not s.skipped and s.total_wall_clock_s > 0]
+            if real:
+                cond_means[cond] = statistics.mean(s.total_wall_clock_s for s in real)
+
+        if all(c in cond_means for c in ["apploop", "sig", "apploop_mtp", "sig_mtp"]):
+            ortho.update(compute_orthogonality_ratio(
+                cond_means["apploop"], cond_means["sig"],
+                cond_means["apploop_mtp"], cond_means["sig_mtp"],
+            ))
+        else:
+            ortho["rho"] = None
+            ortho["valid"] = False
+            ortho["reason"] = "not all 4 conditions have valid data"
+        kitchen_section["orthogonality_analysis"] = ortho
+
+    # 7. Orthogonality from chat results (if kitchen not available)
+    chat_ortho: Dict = {"source": "chat_end_to_end"}
+    if not kitchen_results:
+        sig_only = next((c for c in chat_results if c.mode == "sig_only"), None)
+        sig_mtp = next((c for c in chat_results if c.mode == "sig_mtp"), None)
+        # Chat mode only has sig_only and sig_mtp, not all 4 conditions
+        # So we can't compute full orthogonality, but we can compute SIG+MTP speedup
+        if sig_only and sig_mtp and not sig_only.skipped and not sig_mtp.skipped:
+            if sig_mtp.total_wall_clock_s > 0:
+                chat_ortho["sig_only_wall_s"] = sig_only.total_wall_clock_s
+                chat_ortho["sig_mtp_wall_s"] = sig_mtp.total_wall_clock_s
+                chat_ortho["speedup_x"] = sig_only.total_wall_clock_s / sig_mtp.total_wall_clock_s
+                chat_ortho["note"] = "Full orthogonality ratio requires 4 conditions (AppLoop, SIG, AppLoop+MTP, SIG+MTP). Use --task kitchen for complete analysis."
+        chat_ortho["rho"] = None
+        chat_ortho["valid"] = False
+        chat_ortho["reason"] = "chat_mode_only_has_2_conditions"
+
     return {
         "metadata": {
             "model_path": model_path,
@@ -1141,6 +1719,12 @@ def build_output(
             "results": [asdict(c) for c in chat_results],
             "sig_only_vs_sig_mtp_speedup": speedup,
         },
+        "statistical_analysis": {
+            "per_mode": statistical_analysis,
+            "pairwise_sig_only_vs_sig_mtp": pairwise,
+        },
+        "kitchen_benchmark": kitchen_section,
+        "orthogonality_analysis": kitchen_section.get("orthogonality_analysis", {}) if kitchen_results else chat_ortho,
     }
 
 
@@ -1184,6 +1768,11 @@ def main():
         "--mode", type=str, default="all",
         choices=["all", "no_mtp", "mtp_n1", "mtp_n2", "mtp_n3"],
         help="Restrict to a single mode (default: all 4 modes)",
+    )
+    parser.add_argument(
+        "--task", type=str, default="all",
+        choices=["all", "sweep", "chat", "kitchen"],
+        help="Task to run: all (sweep+chat), sweep, chat, or kitchen (EdgeAgent-Kitchen 4-condition)",
     )
     args = parser.parse_args()
 
@@ -1239,9 +1828,10 @@ def main():
                 ["sig_only", "sig_mtp"], SIG_CHAT_TURNS,
                 reason="skipped_due_to_no_llama_server",
             )
+        kitchen_results: Optional[Dict[str, List[KitchenSessionResult]]] = None
     else:
         single_runs: List[SingleRunResult] = []
-        if not args.skip_sweep:
+        if args.task in ("all", "sweep") and not args.skip_sweep:
             print("\n>>> Running per-cell sweep")
             single_runs = run_mode_sweep(
                 server_bin=server_bin,
@@ -1252,6 +1842,12 @@ def main():
                 base_port=args.port,
                 max_new_tokens=args.max_new_tokens,
             )
+        elif args.task not in ("all", "sweep"):
+            print("\n>>> Skipping per-cell sweep (task != sweep/all)")
+            single_runs = build_placeholder_runs(
+                mode_specs, context_lengths, args.n_runs,
+                reason="skipped_by_task_selection",
+            )
         else:
             print("\n>>> Skipping per-cell sweep (--skip-sweep)")
             single_runs = build_placeholder_runs(
@@ -1260,7 +1856,7 @@ def main():
             )
 
         chat_results: List[ChatEndToEndResult] = []
-        if not args.no_chat:
+        if args.task in ("all", "chat") and not args.no_chat:
             print("\n>>> Running end-to-end SIG-only vs SIG+MTP chat")
             chat_results = []
             print("\n[chat A] SIG-only (no MTP)...")
@@ -1284,6 +1880,28 @@ def main():
                 base_port=args.port,
             ))
 
+        kitchen_results: Optional[Dict[str, List[KitchenSessionResult]]] = None
+        if args.task in ("all", "kitchen"):
+            print("\n>>> Running EdgeAgent-Kitchen 4-condition benchmark")
+            kitchen_results = {}
+            kitchen_conditions = [
+                ("apploop", "none", 0),
+                ("sig", "none", 0),
+                ("apploop_mtp", "draft-mtp", 2),
+                ("sig_mtp", "draft-mtp", 2),
+            ]
+            for cond_label, spec_type, draft_n in kitchen_conditions:
+                print(f"\n[Kitchen] condition={cond_label} (spec_type={spec_type}, draft_n={draft_n})")
+                kitchen_results[cond_label] = run_kitchen_condition(
+                    server_bin=server_bin,
+                    model_path=model_path,
+                    condition=cond_label,
+                    spec_type=spec_type,
+                    spec_draft_n_max=draft_n,
+                    n_runs=args.n_runs,
+                    base_port=args.port,
+                )
+
     out_doc = build_output(
         model_path=model_path,
         n_runs=args.n_runs,
@@ -1294,6 +1912,7 @@ def main():
         llama_server_available=llama_available,
         llama_server_path=server_bin,
         model_available=model_available,
+        kitchen_results=kitchen_results,
     )
 
     out_path = Path(args.output)
@@ -1310,6 +1929,21 @@ def main():
             f"  SIG vs SIG+MTP:  sig_only={sp['sig_only_total_wall_s']:.2f}s  "
             f"sig_mtp={sp['sig_mtp_total_wall_s']:.2f}s  speedup={sp['speedup_x']:.2f}x"
         )
+
+    # Print kitchen results summary
+    if kitchen_results:
+        print("\n  Kitchen Benchmark Summary:")
+        for cond, sessions in kitchen_results.items():
+            real = [s for s in sessions if not s.skipped]
+            if real:
+                mean_wall = statistics.mean(s.total_wall_clock_s for s in real)
+                print(f"    {cond}: {mean_wall:.2f}s (n={len(real)})")
+        # Print orthogonality if available
+        ortho = out_doc.get("orthogonality_analysis", {})
+        if ortho.get("valid"):
+            print(f"    ρ = {ortho['rho']:.3f} ({ortho.get('reason', '')})")
+        elif ortho.get("reason"):
+            print(f"    ρ: {ortho['reason']}")
 
 
 if __name__ == "__main__":
