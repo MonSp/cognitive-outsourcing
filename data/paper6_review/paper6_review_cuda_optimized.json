@@ -1,0 +1,2077 @@
+{
+  "model": "Qwen3.5-4B-Q4_K_M",
+  "gpu": "RTX 4070 SUPER",
+  "timestamp": "2026-06-04 22:15:29",
+  "cuda_restore_estimate_ms": 0.5,
+  "note": "CUDA-optimized PoC replaces CPU numpy extract (50-2100ms) with GPU reshape + D2H (17-57ms). Network transfer remains the dominant bottleneck.",
+  "table_9b_revised": {
+    "0.5": {
+      "128": {
+        "cuda_total_ms": 177.95,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 234.1,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 19.0,
+        "speedup_over_cpu": 1.3,
+        "cuda_breakdown": {
+          "extract_ms": 17.45,
+          "transfer_ms": 160.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 63.6,
+          "translate_ms": 5.0,
+          "transfer_ms": 160.0,
+          "translate_back_ms": 3.5,
+          "restore_ms": 2.0
+        }
+      },
+      "256": {
+        "cuda_total_ms": 327.64,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 472.2,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 32.9,
+        "speedup_over_cpu": 1.4,
+        "cuda_breakdown": {
+          "extract_ms": 7.14,
+          "transfer_ms": 320.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 134.2,
+          "translate_ms": 7.0,
+          "transfer_ms": 320.0,
+          "translate_back_ms": 7.0,
+          "restore_ms": 4.0
+        }
+      },
+      "512": {
+        "cuda_total_ms": 649.77,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 946.8,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 61.0,
+        "speedup_over_cpu": 1.5,
+        "cuda_breakdown": {
+          "extract_ms": 9.27,
+          "transfer_ms": 640.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 270.4,
+          "translate_ms": 14.2,
+          "transfer_ms": 640.0,
+          "translate_back_ms": 14.1,
+          "restore_ms": 8.1
+        }
+      },
+      "1024": {
+        "cuda_total_ms": 1292.81,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 1904.4,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 160.3,
+        "speedup_over_cpu": 1.5,
+        "cuda_breakdown": {
+          "extract_ms": 12.31,
+          "transfer_ms": 1280.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 539.8,
+          "translate_ms": 33.6,
+          "transfer_ms": 1280.0,
+          "translate_back_ms": 32.5,
+          "restore_ms": 18.5
+        }
+      },
+      "2048": {
+        "cuda_total_ms": 2588.21,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 3989.0,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 309.1,
+        "speedup_over_cpu": 1.5,
+        "cuda_breakdown": {
+          "extract_ms": 27.71,
+          "transfer_ms": 2560.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 1088.4,
+          "translate_ms": 249.9,
+          "transfer_ms": 2560.0,
+          "translate_back_ms": 63.2,
+          "restore_ms": 27.5
+        }
+      },
+      "4096": {
+        "cuda_total_ms": 5177.25,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 8595.5,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 651.0,
+        "speedup_over_cpu": 1.7,
+        "cuda_breakdown": {
+          "extract_ms": 56.75,
+          "transfer_ms": 5120.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 2166.9,
+          "translate_ms": 1125.1,
+          "transfer_ms": 5120.0,
+          "translate_back_ms": 131.3,
+          "restore_ms": 52.2
+        }
+      }
+    },
+    "1.0": {
+      "128": {
+        "cuda_total_ms": 97.95,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 154.1,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 19.0,
+        "speedup_over_cpu": 1.6,
+        "cuda_breakdown": {
+          "extract_ms": 17.45,
+          "transfer_ms": 80.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 63.6,
+          "translate_ms": 5.0,
+          "transfer_ms": 80.0,
+          "translate_back_ms": 3.5,
+          "restore_ms": 2.0
+        }
+      },
+      "256": {
+        "cuda_total_ms": 167.64,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 312.2,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 32.9,
+        "speedup_over_cpu": 1.9,
+        "cuda_breakdown": {
+          "extract_ms": 7.14,
+          "transfer_ms": 160.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 134.2,
+          "translate_ms": 7.0,
+          "transfer_ms": 160.0,
+          "translate_back_ms": 7.0,
+          "restore_ms": 4.0
+        }
+      },
+      "512": {
+        "cuda_total_ms": 329.77,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 626.8,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 61.0,
+        "speedup_over_cpu": 1.9,
+        "cuda_breakdown": {
+          "extract_ms": 9.27,
+          "transfer_ms": 320.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 270.4,
+          "translate_ms": 14.2,
+          "transfer_ms": 320.0,
+          "translate_back_ms": 14.1,
+          "restore_ms": 8.1
+        }
+      },
+      "1024": {
+        "cuda_total_ms": 652.81,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 1264.4,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 160.3,
+        "speedup_over_cpu": 1.9,
+        "cuda_breakdown": {
+          "extract_ms": 12.31,
+          "transfer_ms": 640.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 539.8,
+          "translate_ms": 33.6,
+          "transfer_ms": 640.0,
+          "translate_back_ms": 32.5,
+          "restore_ms": 18.5
+        }
+      },
+      "2048": {
+        "cuda_total_ms": 1308.21,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 2709.0,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 309.1,
+        "speedup_over_cpu": 2.1,
+        "cuda_breakdown": {
+          "extract_ms": 27.71,
+          "transfer_ms": 1280.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 1088.4,
+          "translate_ms": 249.9,
+          "transfer_ms": 1280.0,
+          "translate_back_ms": 63.2,
+          "restore_ms": 27.5
+        }
+      },
+      "4096": {
+        "cuda_total_ms": 2617.25,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 6035.5,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 651.0,
+        "speedup_over_cpu": 2.3,
+        "cuda_breakdown": {
+          "extract_ms": 56.75,
+          "transfer_ms": 2560.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 2166.9,
+          "translate_ms": 1125.1,
+          "transfer_ms": 2560.0,
+          "translate_back_ms": 131.3,
+          "restore_ms": 52.2
+        }
+      }
+    },
+    "3.0": {
+      "128": {
+        "cuda_total_ms": 44.62,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 100.77,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 19.0,
+        "speedup_over_cpu": 2.3,
+        "cuda_breakdown": {
+          "extract_ms": 17.45,
+          "transfer_ms": 26.67,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 63.6,
+          "translate_ms": 5.0,
+          "transfer_ms": 26.67,
+          "translate_back_ms": 3.5,
+          "restore_ms": 2.0
+        }
+      },
+      "256": {
+        "cuda_total_ms": 60.97,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 205.53,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 32.9,
+        "speedup_over_cpu": 3.4,
+        "cuda_breakdown": {
+          "extract_ms": 7.14,
+          "transfer_ms": 53.33,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 134.2,
+          "translate_ms": 7.0,
+          "transfer_ms": 53.33,
+          "translate_back_ms": 7.0,
+          "restore_ms": 4.0
+        }
+      },
+      "512": {
+        "cuda_total_ms": 116.44,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 413.47,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 61.0,
+        "speedup_over_cpu": 3.6,
+        "cuda_breakdown": {
+          "extract_ms": 9.27,
+          "transfer_ms": 106.67,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 270.4,
+          "translate_ms": 14.2,
+          "transfer_ms": 106.67,
+          "translate_back_ms": 14.1,
+          "restore_ms": 8.1
+        }
+      },
+      "1024": {
+        "cuda_total_ms": 226.14,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 837.73,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 160.3,
+        "speedup_over_cpu": 3.7,
+        "cuda_breakdown": {
+          "extract_ms": 12.31,
+          "transfer_ms": 213.33,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 539.8,
+          "translate_ms": 33.6,
+          "transfer_ms": 213.33,
+          "translate_back_ms": 32.5,
+          "restore_ms": 18.5
+        }
+      },
+      "2048": {
+        "cuda_total_ms": 454.88,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 1855.67,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 309.1,
+        "speedup_over_cpu": 4.1,
+        "cuda_breakdown": {
+          "extract_ms": 27.71,
+          "transfer_ms": 426.67,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 1088.4,
+          "translate_ms": 249.9,
+          "transfer_ms": 426.67,
+          "translate_back_ms": 63.2,
+          "restore_ms": 27.5
+        }
+      },
+      "4096": {
+        "cuda_total_ms": 910.58,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 4328.83,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 651.0,
+        "speedup_over_cpu": 4.8,
+        "cuda_breakdown": {
+          "extract_ms": 56.75,
+          "transfer_ms": 853.33,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 2166.9,
+          "translate_ms": 1125.1,
+          "transfer_ms": 853.33,
+          "translate_back_ms": 131.3,
+          "restore_ms": 52.2
+        }
+      }
+    },
+    "10.0": {
+      "128": {
+        "cuda_total_ms": 25.95,
+        "cuda_verdict": "EDGE",
+        "cpu_total_ms": 82.1,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 19.0,
+        "speedup_over_cpu": 3.2,
+        "cuda_breakdown": {
+          "extract_ms": 17.45,
+          "transfer_ms": 8.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 63.6,
+          "translate_ms": 5.0,
+          "transfer_ms": 8.0,
+          "translate_back_ms": 3.5,
+          "restore_ms": 2.0
+        }
+      },
+      "256": {
+        "cuda_total_ms": 23.64,
+        "cuda_verdict": "HYBRID",
+        "cpu_total_ms": 168.2,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 32.9,
+        "speedup_over_cpu": 7.1,
+        "cuda_breakdown": {
+          "extract_ms": 7.14,
+          "transfer_ms": 16.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 134.2,
+          "translate_ms": 7.0,
+          "transfer_ms": 16.0,
+          "translate_back_ms": 7.0,
+          "restore_ms": 4.0
+        }
+      },
+      "512": {
+        "cuda_total_ms": 41.77,
+        "cuda_verdict": "HYBRID",
+        "cpu_total_ms": 338.8,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 61.0,
+        "speedup_over_cpu": 8.1,
+        "cuda_breakdown": {
+          "extract_ms": 9.27,
+          "transfer_ms": 32.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 270.4,
+          "translate_ms": 14.2,
+          "transfer_ms": 32.0,
+          "translate_back_ms": 14.1,
+          "restore_ms": 8.1
+        }
+      },
+      "1024": {
+        "cuda_total_ms": 76.81,
+        "cuda_verdict": "HYBRID",
+        "cpu_total_ms": 688.4,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 160.3,
+        "speedup_over_cpu": 9.0,
+        "cuda_breakdown": {
+          "extract_ms": 12.31,
+          "transfer_ms": 64.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 539.8,
+          "translate_ms": 33.6,
+          "transfer_ms": 64.0,
+          "translate_back_ms": 32.5,
+          "restore_ms": 18.5
+        }
+      },
+      "2048": {
+        "cuda_total_ms": 156.21,
+        "cuda_verdict": "HYBRID",
+        "cpu_total_ms": 1557.0,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 309.1,
+        "speedup_over_cpu": 10.0,
+        "cuda_breakdown": {
+          "extract_ms": 27.71,
+          "transfer_ms": 128.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 1088.4,
+          "translate_ms": 249.9,
+          "transfer_ms": 128.0,
+          "translate_back_ms": 63.2,
+          "restore_ms": 27.5
+        }
+      },
+      "4096": {
+        "cuda_total_ms": 313.25,
+        "cuda_verdict": "HYBRID",
+        "cpu_total_ms": 3731.5,
+        "cpu_verdict": "EDGE",
+        "local_prefill_ms": 651.0,
+        "speedup_over_cpu": 11.9,
+        "cuda_breakdown": {
+          "extract_ms": 56.75,
+          "transfer_ms": 256.0,
+          "restore_ms": 0.5
+        },
+        "cpu_breakdown": {
+          "extract_ms": 2166.9,
+          "translate_ms": 1125.1,
+          "transfer_ms": 256.0,
+          "translate_back_ms": 131.3,
+          "restore_ms": 52.2
+        }
+      }
+    }
+  },
+  "jitter_sensitivity": {
+    "0.5": {
+      "128": {
+        "n_tokens": 128,
+        "cuda_non_transfer_ms": 17.95,
+        "local_prefill_ms": 19.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 185.9,
+            "p99_total_ms": 322.57
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 653.96,
+            "p99_total_ms": 8017.95
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 1548.73,
+            "p99_total_ms": 8017.95
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 2690.1,
+            "p99_total_ms": 8017.95
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 3405.3,
+            "p99_total_ms": 8017.95
+          }
+        }
+      },
+      "256": {
+        "n_tokens": 256,
+        "cuda_non_transfer_ms": 7.64,
+        "local_prefill_ms": 32.9,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 342.75,
+            "p99_total_ms": 612.42
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 1330.22,
+            "p99_total_ms": 16007.64
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 3095.2,
+            "p99_total_ms": 16007.64
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 5291.47,
+            "p99_total_ms": 16007.64
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.002,
+            "mean_total_ms": 6808.77,
+            "p99_total_ms": 16007.64
+          }
+        }
+      },
+      "512": {
+        "n_tokens": 512,
+        "cuda_non_transfer_ms": 9.77,
+        "local_prefill_ms": 61.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 679.72,
+            "p99_total_ms": 1199.13
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 2613.96,
+            "p99_total_ms": 32009.77
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 6210.43,
+            "p99_total_ms": 32009.77
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 10526.34,
+            "p99_total_ms": 32009.77
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0017,
+            "mean_total_ms": 13486.78,
+            "p99_total_ms": 32009.77
+          }
+        }
+      },
+      "1024": {
+        "n_tokens": 1024,
+        "cuda_non_transfer_ms": 12.81,
+        "local_prefill_ms": 160.3,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 1349.98,
+            "p99_total_ms": 2415.7
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 5039.0,
+            "p99_total_ms": 64012.81
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 11925.72,
+            "p99_total_ms": 64012.81
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0002,
+            "mean_total_ms": 21293.06,
+            "p99_total_ms": 64012.81
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0264,
+            "mean_total_ms": 26081.94,
+            "p99_total_ms": 64012.81
+          }
+        }
+      },
+      "2048": {
+        "n_tokens": 2048,
+        "cuda_non_transfer_ms": 28.21,
+        "local_prefill_ms": 309.1,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 2707.31,
+            "p99_total_ms": 4844.66
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 10471.72,
+            "p99_total_ms": 128028.21
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 24453.14,
+            "p99_total_ms": 128028.21
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0001,
+            "mean_total_ms": 41751.71,
+            "p99_total_ms": 128028.21
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0218,
+            "mean_total_ms": 52170.7,
+            "p99_total_ms": 128028.21
+          }
+        }
+      },
+      "4096": {
+        "n_tokens": 4096,
+        "cuda_non_transfer_ms": 57.25,
+        "local_prefill_ms": 651.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 5424.1,
+            "p99_total_ms": 9587.56
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 20535.46,
+            "p99_total_ms": 256057.25
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 49127.63,
+            "p99_total_ms": 256057.25
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 84628.61,
+            "p99_total_ms": 256057.25
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.026,
+            "mean_total_ms": 108705.57,
+            "p99_total_ms": 256057.25
+          }
+        }
+      }
+    },
+    "1.0": {
+      "128": {
+        "n_tokens": 128,
+        "cuda_non_transfer_ms": 17.95,
+        "local_prefill_ms": 19.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 98.8,
+            "p99_total_ms": 123.31
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 115.21,
+            "p99_total_ms": 275.43
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 330.59,
+            "p99_total_ms": 8017.95
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 1393.37,
+            "p99_total_ms": 8017.95
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 2596.19,
+            "p99_total_ms": 8017.95
+          }
+        }
+      },
+      "256": {
+        "n_tokens": 256,
+        "cuda_non_transfer_ms": 7.64,
+        "local_prefill_ms": 32.9,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 169.42,
+            "p99_total_ms": 217.47
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 195.27,
+            "p99_total_ms": 555.71
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 618.78,
+            "p99_total_ms": 16007.64
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 2853.71,
+            "p99_total_ms": 16007.64
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0045,
+            "mean_total_ms": 5035.2,
+            "p99_total_ms": 16007.64
+          }
+        }
+      },
+      "512": {
+        "n_tokens": 512,
+        "cuda_non_transfer_ms": 9.77,
+        "local_prefill_ms": 61.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 333.35,
+            "p99_total_ms": 427.71
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 390.87,
+            "p99_total_ms": 1076.63
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 1280.41,
+            "p99_total_ms": 32009.77
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 5799.2,
+            "p99_total_ms": 32009.77
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.006,
+            "mean_total_ms": 10320.09,
+            "p99_total_ms": 32009.77
+          }
+        }
+      },
+      "1024": {
+        "n_tokens": 1024,
+        "cuda_non_transfer_ms": 12.81,
+        "local_prefill_ms": 160.3,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 657.61,
+            "p99_total_ms": 842.42
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 775.22,
+            "p99_total_ms": 2057.72
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 2485.72,
+            "p99_total_ms": 64012.81
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0004,
+            "mean_total_ms": 11502.96,
+            "p99_total_ms": 64012.81
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0469,
+            "mean_total_ms": 20560.05,
+            "p99_total_ms": 64012.81
+          }
+        }
+      },
+      "2048": {
+        "n_tokens": 2048,
+        "cuda_non_transfer_ms": 28.21,
+        "local_prefill_ms": 309.1,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 1321.98,
+            "p99_total_ms": 1700.23
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 1587.18,
+            "p99_total_ms": 4455.44
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 4804.0,
+            "p99_total_ms": 128028.21
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0002,
+            "mean_total_ms": 23059.17,
+            "p99_total_ms": 128028.21
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0366,
+            "mean_total_ms": 40151.58,
+            "p99_total_ms": 128028.21
+          }
+        }
+      },
+      "4096": {
+        "n_tokens": 4096,
+        "cuda_non_transfer_ms": 57.25,
+        "local_prefill_ms": 651.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 2646.39,
+            "p99_total_ms": 3394.7
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 3121.74,
+            "p99_total_ms": 8718.18
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 10301.61,
+            "p99_total_ms": 256057.25
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0004,
+            "mean_total_ms": 45862.47,
+            "p99_total_ms": 256057.25
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0516,
+            "mean_total_ms": 81712.43,
+            "p99_total_ms": 256057.25
+          }
+        }
+      }
+    },
+    "3.0": {
+      "128": {
+        "n_tokens": 128,
+        "cuda_non_transfer_ms": 17.95,
+        "local_prefill_ms": 19.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 44.64,
+            "p99_total_ms": 46.82
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 44.91,
+            "p99_total_ms": 52.92
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 45.5,
+            "p99_total_ms": 61.83
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 64.57,
+            "p99_total_ms": 145.52
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 599.86,
+            "p99_total_ms": 8017.95
+          }
+        }
+      },
+      "256": {
+        "n_tokens": 256,
+        "cuda_non_transfer_ms": 7.64,
+        "local_prefill_ms": 32.9,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 61.01,
+            "p99_total_ms": 65.34
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 61.52,
+            "p99_total_ms": 77.69
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 62.58,
+            "p99_total_ms": 94.18
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0004,
+            "mean_total_ms": 85.79,
+            "p99_total_ms": 227.49
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0509,
+            "mean_total_ms": 1248.73,
+            "p99_total_ms": 16007.64
+          }
+        }
+      },
+      "512": {
+        "n_tokens": 512,
+        "cuda_non_transfer_ms": 9.77,
+        "local_prefill_ms": 61.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 116.56,
+            "p99_total_ms": 125.45
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 117.4,
+            "p99_total_ms": 147.83
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 119.61,
+            "p99_total_ms": 183.64
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0006,
+            "mean_total_ms": 209.28,
+            "p99_total_ms": 506.97
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0519,
+            "mean_total_ms": 2422.47,
+            "p99_total_ms": 32009.77
+          }
+        }
+      },
+      "1024": {
+        "n_tokens": 1024,
+        "cuda_non_transfer_ms": 12.81,
+        "local_prefill_ms": 160.3,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 226.37,
+            "p99_total_ms": 244.23
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 228.24,
+            "p99_total_ms": 291.56
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0038,
+            "mean_total_ms": 232.55,
+            "p99_total_ms": 361.4
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0915,
+            "mean_total_ms": 325.35,
+            "p99_total_ms": 889.57
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.2528,
+            "mean_total_ms": 5011.1,
+            "p99_total_ms": 64012.81
+          }
+        }
+      },
+      "2048": {
+        "n_tokens": 2048,
+        "cuda_non_transfer_ms": 28.21,
+        "local_prefill_ms": 309.1,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 455.41,
+            "p99_total_ms": 491.05
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 459.1,
+            "p99_total_ms": 585.76
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0006,
+            "mean_total_ms": 469.0,
+            "p99_total_ms": 722.2
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.059,
+            "mean_total_ms": 731.8,
+            "p99_total_ms": 1999.46
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.2147,
+            "mean_total_ms": 9810.82,
+            "p99_total_ms": 128028.21
+          }
+        }
+      },
+      "4096": {
+        "n_tokens": 4096,
+        "cuda_non_transfer_ms": 57.25,
+        "local_prefill_ms": 651.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 911.28,
+            "p99_total_ms": 982.47
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 918.02,
+            "p99_total_ms": 1167.86
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0039,
+            "mean_total_ms": 938.19,
+            "p99_total_ms": 1449.63
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0918,
+            "mean_total_ms": 1369.93,
+            "p99_total_ms": 3653.74
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.2599,
+            "mean_total_ms": 18632.22,
+            "p99_total_ms": 256057.25
+          }
+        }
+      }
+    },
+    "10.0": {
+      "128": {
+        "n_tokens": 128,
+        "cuda_non_transfer_ms": 17.95,
+        "local_prefill_ms": 19.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 25.95,
+            "p99_total_ms": 26.14
+          },
+          "0.3": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 25.95,
+            "p99_total_ms": 26.55
+          },
+          "0.5": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 25.96,
+            "p99_total_ms": 26.98
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 26.04,
+            "p99_total_ms": 28.39
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.0,
+            "mean_total_ms": 26.29,
+            "p99_total_ms": 32.68
+          }
+        }
+      },
+      "256": {
+        "n_tokens": 256,
+        "cuda_non_transfer_ms": 7.64,
+        "local_prefill_ms": 32.9,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 23.64,
+            "p99_total_ms": 24.02
+          },
+          "0.3": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 23.65,
+            "p99_total_ms": 24.84
+          },
+          "0.5": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 23.69,
+            "p99_total_ms": 25.82
+          },
+          "1.0": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 23.77,
+            "p99_total_ms": 28.41
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.9656,
+            "mean_total_ms": 24.39,
+            "p99_total_ms": 37.45
+          }
+        }
+      },
+      "512": {
+        "n_tokens": 512,
+        "cuda_non_transfer_ms": 9.77,
+        "local_prefill_ms": 61.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 41.77,
+            "p99_total_ms": 42.52
+          },
+          "0.3": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 41.81,
+            "p99_total_ms": 44.17
+          },
+          "0.5": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 41.85,
+            "p99_total_ms": 45.89
+          },
+          "1.0": {
+            "p_hybrid_wins": 0.9999,
+            "mean_total_ms": 42.08,
+            "p99_total_ms": 51.53
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.9728,
+            "mean_total_ms": 43.16,
+            "p99_total_ms": 68.17
+          }
+        }
+      },
+      "1024": {
+        "n_tokens": 1024,
+        "cuda_non_transfer_ms": 12.81,
+        "local_prefill_ms": 160.3,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 76.82,
+            "p99_total_ms": 78.32
+          },
+          "0.3": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 76.87,
+            "p99_total_ms": 81.69
+          },
+          "0.5": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 76.97,
+            "p99_total_ms": 85.0
+          },
+          "1.0": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 77.37,
+            "p99_total_ms": 96.42
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.9967,
+            "mean_total_ms": 79.73,
+            "p99_total_ms": 134.86
+          }
+        }
+      },
+      "2048": {
+        "n_tokens": 2048,
+        "cuda_non_transfer_ms": 28.21,
+        "local_prefill_ms": 309.1,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 156.23,
+            "p99_total_ms": 159.25
+          },
+          "0.3": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 156.28,
+            "p99_total_ms": 165.68
+          },
+          "0.5": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 156.58,
+            "p99_total_ms": 173.55
+          },
+          "1.0": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 157.34,
+            "p99_total_ms": 194.56
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.996,
+            "mean_total_ms": 162.06,
+            "p99_total_ms": 263.69
+          }
+        }
+      },
+      "4096": {
+        "n_tokens": 4096,
+        "cuda_non_transfer_ms": 57.25,
+        "local_prefill_ms": 651.0,
+        "by_sigma": {
+          "0.1": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 313.31,
+            "p99_total_ms": 319.49
+          },
+          "0.3": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 313.5,
+            "p99_total_ms": 332.05
+          },
+          "0.5": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 313.79,
+            "p99_total_ms": 346.7
+          },
+          "1.0": {
+            "p_hybrid_wins": 1.0,
+            "mean_total_ms": 315.73,
+            "p99_total_ms": 390.51
+          },
+          "2.0": {
+            "p_hybrid_wins": 0.9977,
+            "mean_total_ms": 325.53,
+            "p99_total_ms": 539.78
+          }
+        }
+      }
+    }
+  },
+  "multi_tenant_breakeven": {
+    "multi_tenant_table": {
+      "1": {
+        "per_device_bw_gbps": 10.0,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 25.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 23.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "HYBRID"
+          },
+          "512": {
+            "cuda_total_ms": 41.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "HYBRID"
+          },
+          "1024": {
+            "cuda_total_ms": 76.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "HYBRID"
+          },
+          "2048": {
+            "cuda_total_ms": 156.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "HYBRID"
+          },
+          "4096": {
+            "cuda_total_ms": 313.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "HYBRID"
+          }
+        }
+      },
+      "2": {
+        "per_device_bw_gbps": 5.0,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 33.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 39.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 73.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 140.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "HYBRID"
+          },
+          "2048": {
+            "cuda_total_ms": 284.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "HYBRID"
+          },
+          "4096": {
+            "cuda_total_ms": 569.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "HYBRID"
+          }
+        }
+      },
+      "3": {
+        "per_device_bw_gbps": 3.333,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 41.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 55.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 105.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 204.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 412.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 825.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      },
+      "4": {
+        "per_device_bw_gbps": 2.5,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 49.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 71.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 137.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 268.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 540.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 1081.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      },
+      "5": {
+        "per_device_bw_gbps": 2.0,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 57.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 87.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 169.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 332.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 668.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 1337.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      },
+      "8": {
+        "per_device_bw_gbps": 1.25,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 81.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 135.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 265.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 524.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 1052.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 2105.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      },
+      "10": {
+        "per_device_bw_gbps": 1.0,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 97.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 167.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 329.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 652.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 1308.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 2617.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      },
+      "15": {
+        "per_device_bw_gbps": 0.667,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 137.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 247.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 489.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 972.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 1948.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 3897.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      },
+      "20": {
+        "per_device_bw_gbps": 0.5,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 177.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 327.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 649.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 1292.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 2588.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 5177.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      },
+      "50": {
+        "per_device_bw_gbps": 0.2,
+        "by_tokens": {
+          "128": {
+            "cuda_total_ms": 417.95,
+            "local_prefill_ms": 19.0,
+            "verdict": "EDGE"
+          },
+          "256": {
+            "cuda_total_ms": 807.64,
+            "local_prefill_ms": 32.9,
+            "verdict": "EDGE"
+          },
+          "512": {
+            "cuda_total_ms": 1609.77,
+            "local_prefill_ms": 61.0,
+            "verdict": "EDGE"
+          },
+          "1024": {
+            "cuda_total_ms": 3212.81,
+            "local_prefill_ms": 160.3,
+            "verdict": "EDGE"
+          },
+          "2048": {
+            "cuda_total_ms": 6428.21,
+            "local_prefill_ms": 309.1,
+            "verdict": "EDGE"
+          },
+          "4096": {
+            "cuda_total_ms": 12857.25,
+            "local_prefill_ms": 651.0,
+            "verdict": "EDGE"
+          }
+        }
+      }
+    },
+    "break_even": {
+      "128": {
+        "max_hybrid_devices": 0,
+        "break_even_per_device_bw_gbps": "10.000"
+      },
+      "256": {
+        "max_hybrid_devices": 1,
+        "break_even_per_device_bw_gbps": "5.000"
+      },
+      "512": {
+        "max_hybrid_devices": 1,
+        "break_even_per_device_bw_gbps": "5.000"
+      },
+      "1024": {
+        "max_hybrid_devices": 2,
+        "break_even_per_device_bw_gbps": "3.333"
+      },
+      "2048": {
+        "max_hybrid_devices": 2,
+        "break_even_per_device_bw_gbps": "3.333"
+      },
+      "4096": {
+        "max_hybrid_devices": 2,
+        "break_even_per_device_bw_gbps": "3.333"
+      }
+    }
+  },
+  "feasibility_domain": {
+    "feasibility_domain": {
+      "0.5": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 177.95,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -158.95
+        },
+        "256": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 327.64,
+          "local_prefill_ms": 32.9,
+          "margin_ms": -294.74
+        },
+        "512": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 649.77,
+          "local_prefill_ms": 61.0,
+          "margin_ms": -588.77
+        },
+        "1024": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 1292.81,
+          "local_prefill_ms": 160.3,
+          "margin_ms": -1132.51
+        },
+        "2048": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 2588.21,
+          "local_prefill_ms": 309.1,
+          "margin_ms": -2279.11
+        },
+        "4096": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 5177.25,
+          "local_prefill_ms": 651.0,
+          "margin_ms": -4526.25
+        }
+      },
+      "1.0": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 97.95,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -78.95
+        },
+        "256": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 167.64,
+          "local_prefill_ms": 32.9,
+          "margin_ms": -134.74
+        },
+        "512": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 329.77,
+          "local_prefill_ms": 61.0,
+          "margin_ms": -268.77
+        },
+        "1024": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 652.81,
+          "local_prefill_ms": 160.3,
+          "margin_ms": -492.51
+        },
+        "2048": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 1308.21,
+          "local_prefill_ms": 309.1,
+          "margin_ms": -999.11
+        },
+        "4096": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 2617.25,
+          "local_prefill_ms": 651.0,
+          "margin_ms": -1966.25
+        }
+      },
+      "2.0": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 57.95,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -38.95
+        },
+        "256": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 87.64,
+          "local_prefill_ms": 32.9,
+          "margin_ms": -54.74
+        },
+        "512": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 169.77,
+          "local_prefill_ms": 61.0,
+          "margin_ms": -108.77
+        },
+        "1024": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 332.81,
+          "local_prefill_ms": 160.3,
+          "margin_ms": -172.51
+        },
+        "2048": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 668.21,
+          "local_prefill_ms": 309.1,
+          "margin_ms": -359.11
+        },
+        "4096": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 1337.25,
+          "local_prefill_ms": 651.0,
+          "margin_ms": -686.25
+        }
+      },
+      "3.0": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 44.62,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -25.62
+        },
+        "256": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 60.97,
+          "local_prefill_ms": 32.9,
+          "margin_ms": -28.07
+        },
+        "512": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 116.44,
+          "local_prefill_ms": 61.0,
+          "margin_ms": -55.44
+        },
+        "1024": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 226.14,
+          "local_prefill_ms": 160.3,
+          "margin_ms": -65.84
+        },
+        "2048": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 454.88,
+          "local_prefill_ms": 309.1,
+          "margin_ms": -145.78
+        },
+        "4096": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 910.58,
+          "local_prefill_ms": 651.0,
+          "margin_ms": -259.58
+        }
+      },
+      "5.0": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 33.95,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -14.95
+        },
+        "256": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 39.64,
+          "local_prefill_ms": 32.9,
+          "margin_ms": -6.74
+        },
+        "512": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 73.77,
+          "local_prefill_ms": 61.0,
+          "margin_ms": -12.77
+        },
+        "1024": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 140.81,
+          "local_prefill_ms": 160.3,
+          "margin_ms": 19.49
+        },
+        "2048": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 284.21,
+          "local_prefill_ms": 309.1,
+          "margin_ms": 24.89
+        },
+        "4096": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 569.25,
+          "local_prefill_ms": 651.0,
+          "margin_ms": 81.75
+        }
+      },
+      "7.5": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 28.62,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -9.62
+        },
+        "256": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 28.97,
+          "local_prefill_ms": 32.9,
+          "margin_ms": 3.93
+        },
+        "512": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 52.44,
+          "local_prefill_ms": 61.0,
+          "margin_ms": 8.56
+        },
+        "1024": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 98.14,
+          "local_prefill_ms": 160.3,
+          "margin_ms": 62.16
+        },
+        "2048": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 198.88,
+          "local_prefill_ms": 309.1,
+          "margin_ms": 110.22
+        },
+        "4096": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 398.58,
+          "local_prefill_ms": 651.0,
+          "margin_ms": 252.42
+        }
+      },
+      "10.0": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 25.95,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -6.95
+        },
+        "256": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 23.64,
+          "local_prefill_ms": 32.9,
+          "margin_ms": 9.26
+        },
+        "512": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 41.77,
+          "local_prefill_ms": 61.0,
+          "margin_ms": 19.23
+        },
+        "1024": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 76.81,
+          "local_prefill_ms": 160.3,
+          "margin_ms": 83.49
+        },
+        "2048": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 156.21,
+          "local_prefill_ms": 309.1,
+          "margin_ms": 152.89
+        },
+        "4096": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 313.25,
+          "local_prefill_ms": 651.0,
+          "margin_ms": 337.75
+        }
+      },
+      "20.0": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 21.95,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -2.95
+        },
+        "256": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 15.64,
+          "local_prefill_ms": 32.9,
+          "margin_ms": 17.26
+        },
+        "512": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 25.77,
+          "local_prefill_ms": 61.0,
+          "margin_ms": 35.23
+        },
+        "1024": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 44.81,
+          "local_prefill_ms": 160.3,
+          "margin_ms": 115.49
+        },
+        "2048": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 92.21,
+          "local_prefill_ms": 309.1,
+          "margin_ms": 216.89
+        },
+        "4096": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 185.25,
+          "local_prefill_ms": 651.0,
+          "margin_ms": 465.75
+        }
+      },
+      "50.0": {
+        "128": {
+          "verdict": "EDGE",
+          "cuda_total_ms": 19.55,
+          "local_prefill_ms": 19.0,
+          "margin_ms": -0.55
+        },
+        "256": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 10.84,
+          "local_prefill_ms": 32.9,
+          "margin_ms": 22.06
+        },
+        "512": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 16.17,
+          "local_prefill_ms": 61.0,
+          "margin_ms": 44.83
+        },
+        "1024": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 25.61,
+          "local_prefill_ms": 160.3,
+          "margin_ms": 134.69
+        },
+        "2048": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 53.81,
+          "local_prefill_ms": 309.1,
+          "margin_ms": 255.29
+        },
+        "4096": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 108.45,
+          "local_prefill_ms": 651.0,
+          "margin_ms": 542.55
+        }
+      },
+      "100.0": {
+        "128": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 18.75,
+          "local_prefill_ms": 19.0,
+          "margin_ms": 0.25
+        },
+        "256": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 9.24,
+          "local_prefill_ms": 32.9,
+          "margin_ms": 23.66
+        },
+        "512": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 12.97,
+          "local_prefill_ms": 61.0,
+          "margin_ms": 48.03
+        },
+        "1024": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 19.21,
+          "local_prefill_ms": 160.3,
+          "margin_ms": 141.09
+        },
+        "2048": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 41.01,
+          "local_prefill_ms": 309.1,
+          "margin_ms": 268.09
+        },
+        "4096": {
+          "verdict": "HYBRID",
+          "cuda_total_ms": 82.85,
+          "local_prefill_ms": 651.0,
+          "margin_ms": 568.15
+        }
+      }
+    },
+    "bandwidth_thresholds": {
+      "128": {
+        "cuda_non_transfer_ms": 17.95,
+        "local_prefill_ms": 19.0,
+        "budget_for_transfer_ms": 1.05,
+        "threshold_gbps": 76.19
+      },
+      "256": {
+        "cuda_non_transfer_ms": 7.64,
+        "local_prefill_ms": 32.9,
+        "budget_for_transfer_ms": 25.26,
+        "threshold_gbps": 6.33
+      },
+      "512": {
+        "cuda_non_transfer_ms": 9.77,
+        "local_prefill_ms": 61.0,
+        "budget_for_transfer_ms": 51.23,
+        "threshold_gbps": 6.25
+      },
+      "1024": {
+        "cuda_non_transfer_ms": 12.81,
+        "local_prefill_ms": 160.3,
+        "budget_for_transfer_ms": 147.49,
+        "threshold_gbps": 4.34
+      },
+      "2048": {
+        "cuda_non_transfer_ms": 28.21,
+        "local_prefill_ms": 309.1,
+        "budget_for_transfer_ms": 280.89,
+        "threshold_gbps": 4.56
+      },
+      "4096": {
+        "cuda_non_transfer_ms": 57.25,
+        "local_prefill_ms": 651.0,
+        "budget_for_transfer_ms": 593.75,
+        "threshold_gbps": 4.31
+      }
+    }
+  }
+}
