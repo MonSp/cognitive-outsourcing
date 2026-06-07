@@ -15,6 +15,14 @@ Cognitive Outsourcing (CO) is an edge-AI architecture that empowers lightweight 
 | 3 | [CO-SIG Architecture & Design Space](paper/CO_SIG_Architecture_Theory_Empirical_Design_Space_for_Scalable_Edge_Intelligence.md) | Boundaries (R6–R14), cross-architecture, Batch-SIG | 2.79–5.26× deep-chain speedup, Batch-SIG 4.24–6.82× (architecture-independent), SIG Decision Framework | ✅ |
 | 4 | [SIG as Edge Runtime Primitive](paper/Suspend-and-Inject%20Generation%20as%20an%20Edge%20Inference%20Runtime%20Primitive%20for%20Long-Horizon%20Agent%20Tasks.md) | Deployment (R15–R19), Kitchen benchmark | 2.54× wall-clock speedup, prefill crossover ~1.5–2B, per-token rate 108 vs 103 tok/s | ✅ |
 | **5** | [**Orthogonal Acceleration**](paper/5_Orthogonal_Acceleration/paper.md) | **CO + MTP compound acceleration** | **SIG 3.50×, native MTP 1.27×, SIG+MTP 4.52× compound, ρ = 1.239 (Kitchen)** | **✅ Round 6** |
+| **6** | [**Convergent KVCache Architectures**](paper/6_Convergent_KVCache_Architectures/paper.md) | **KFC unified framework, cloud-edge convergence** | **8-dim convergence analysis, 96–99.8% prefill reduction captured by SIG alone, prefix caching marginal (0.23–3.82%)** | **✅** |
+
+## Survey Papers
+
+| Paper | Language | Focus |
+|-------|----------|-------|
+| [综述：从认知外包到智能体推理引擎](paper/survey_SIG_CO_agent_frameworks_CN.md) | 中文 | SIG 核心理念 + CO 认知架构 + 对现代智能体框架的启发 |
+| [Survey: From Cognitive Outsourcing to Agent Inference Engines](paper/survey_SIG_CO_agent_frameworks_EN.md) | English | SIG core ideas + CO cognitive architecture + implications for modern agent frameworks |
 
 ## Core Findings Across the Program
 
@@ -106,18 +114,25 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 | 3 | [CO-SIG Architecture & Design Space](paper/CO_SIG_Architecture_Theory_Empirical_Design_Space_for_Scalable_Edge_Intelligence.md) |
 | 4 | [SIG as Edge Runtime Primitive](paper/Suspend-and-Inject%20Generation%20as%20an%20Edge%20Inference%20Runtime%20Primitive%20for%20Long-Horizon%20Agent%20Tasks.md) |
 | 5 | [Orthogonal Acceleration](paper/5_Orthogonal_Acceleration/paper.md) |
+| 6 | [Convergent KVCache Architectures](paper/6_Convergent_KVCache_Architectures/paper.md) |
+| Survey (CN) | [综述：从认知外包到智能体推理引擎](paper/survey_SIG_CO_agent_frameworks_CN.md) |
+| Survey (EN) | [Survey: From CO to Agent Inference Engines](paper/survey_SIG_CO_agent_frameworks_EN.md) |
 
 ## Repository Structure
 
 ```
-├── paper/                              # All five papers
-│   ├── 5_Orthogonal_Acceleration/      # Paper 5 (latest)
+├── paper/                              # All papers and surveys
+│   ├── 5_Orthogonal_Acceleration/      # Paper 5: Orthogonal Acceleration
 │   │   ├── paper.md                    # Full paper (Round 6)
 │   │   └── figures/                    # All figures
+│   ├── 6_Convergent_KVCache_Architectures/ # Paper 6: KFC unified framework
+│   │   └── paper.md                    # Full paper
 │   ├── Cognitive Outsourcing...md      # Paper 1: CO architecture
 │   ├── Beyond_the_Injection_Engine.md  # Paper 2: Theory (R1–R5)
 │   ├── CO_SIG_Architecture...md        # Paper 3: Design space (R6–R14)
-│   └── Suspend-and-Inject...md         # Paper 4: Deployment (R15–R19)
+│   ├── Suspend-and-Inject...md         # Paper 4: Deployment (R15–R19)
+│   ├── survey_SIG_CO_agent_frameworks_CN.md  # Survey (Chinese)
+│   └── survey_SIG_CO_agent_frameworks_EN.md  # Survey (English)
 ├── data/                               # Raw experiment data (JSON)
 │   ├── exp1_4B/                        # EXP-1: Orthogonality (4B)
 │   ├── exp1_08B/                       # EXP-1: Orthogonality (0.8B)
@@ -207,7 +222,16 @@ python cross_arch_sig_bench.py --model models/gemma-4-E2B-it-Q4_K_M.gguf
          for Scalable Embodied Intelligence},
   author={SIG/CO Research Program},
   year={2026},
-  note={Papers 1--5 in the SIG/CO Research Program}
+  note={Papers 1--6 in the SIG/CO Research Program}
+}
+
+@article{co-sig-survey-2026,
+  title={From Cognitive Outsourcing to Agent Inference Engines:
+         Core Ideas of Suspend-and-Inject Generation and Their
+         Implications for Modern Agent Frameworks},
+  author={SIG/CO Research Program},
+  year={2026},
+  note={Survey paper (CN/EN)}
 }
 ```
 
