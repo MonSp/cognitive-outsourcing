@@ -83,3 +83,9 @@ try:
 except ImportError:
     AcceptanceRateTracker = None
     fit_recovery_model = None
+
+try:
+    from .kvcache_persist import DiskKVCache, CacheEntry
+except ImportError:
+    DiskKVCache = None
+    CacheEntry = None

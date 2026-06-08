@@ -1,0 +1,236 @@
+{
+  "model": "Qwen3.5-4B-Q4_K_M.gguf",
+  "n_ctx": 8192,
+  "n_gpu_layers": 99,
+  "n_prefix_tokens": 58,
+  "exp1_latency": {
+    "n_sessions": 10,
+    "n_prefix_tokens": 58,
+    "cold_start_per_session_ms": [
+      118.94,
+      7.03,
+      1.0,
+      0.0,
+      0.0,
+      2.02,
+      0.0,
+      1.51,
+      0.0,
+      1.5
+    ],
+    "cold_start_avg_ms": 13.2,
+    "cold_start_median_ms": 1.5,
+    "pc_restore_per_session_ms": [
+      0.0,
+      1.83,
+      0.0,
+      1.0,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      2.0,
+      0.0
+    ],
+    "pc_restore_avg_ms": 0.58,
+    "disk_save_per_session_ms": [
+      185.5,
+      157.96,
+      167.09,
+      147.97,
+      145.56,
+      136.7,
+      148.38,
+      138.53,
+      140.25,
+      138.9
+    ],
+    "disk_save_avg_ms": 150.68,
+    "disk_save_median_ms": 147.97,
+    "disk_load_per_session_ms": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      19.84
+    ],
+    "disk_load_avg_ms": 1.98,
+    "disk_load_median_ms": 0.0,
+    "disk_usage_bytes": 54593774,
+    "disk_usage_mb": 52.06,
+    "cache_stats": {
+      "saves": 10,
+      "loads": 1,
+      "hits": 1,
+      "misses": 9,
+      "evictions": 0,
+      "bytes_written": 545934660,
+      "bytes_read": 0,
+      "entries": 1,
+      "total_bytes": 54593466,
+      "total_bytes_mb": 52.06
+    }
+  },
+  "exp2_multi_session": {
+    "n_sessions": 5,
+    "n_prefix_tokens": 58,
+    "cold_per_session_ms": [
+      8.11,
+      15.59,
+      17.3,
+      15.57,
+      17.15
+    ],
+    "cold_avg_ms": 14.74,
+    "cold_total_ms": 73.71,
+    "first_cold_ms": 14.89,
+    "disk_save_ms": 134.8,
+    "disk_load_per_session_ms": [
+      18.36,
+      17.09,
+      17.74,
+      19.56
+    ],
+    "disk_load_avg_ms": 18.19,
+    "disk_total_ms": 222.43,
+    "warm_reload_ms": 19.32,
+    "savings_ms": -148.72,
+    "savings_pct": -201.7,
+    "breakeven_sessions": Infinity
+  },
+  "exp3_decomposition": {
+    "prefixes": {
+      "system": {
+        "n_tokens": 7,
+        "state_bytes": 52921278,
+        "state_mb": 50.47,
+        "nonzero_bytes": 52737494,
+        "nonzero_ratio_pct": 99.7,
+        "zero_padding_pct": 0.3,
+        "compressed_raw_bytes": 49745204,
+        "compressed_nonzero_bytes": 49525414,
+        "bytes_per_token": 7560183.0
+      },
+      "tools": {
+        "n_tokens": 51,
+        "state_bytes": 54363950,
+        "state_mb": 51.85,
+        "nonzero_bytes": 54178281,
+        "nonzero_ratio_pct": 99.7,
+        "zero_padding_pct": 0.3,
+        "compressed_raw_bytes": 51080761,
+        "compressed_nonzero_bytes": 50859782,
+        "bytes_per_token": 1065960.0
+      },
+      "combined": {
+        "n_tokens": 59,
+        "state_bytes": 54626254,
+        "state_mb": 52.1,
+        "nonzero_bytes": 54439655,
+        "nonzero_ratio_pct": 99.7,
+        "zero_padding_pct": 0.3,
+        "compressed_raw_bytes": 51324871,
+        "compressed_nonzero_bytes": 51102427,
+        "bytes_per_token": 925869.0
+      },
+      "incremental_tools_after_system": {
+        "bytes": 262304,
+        "mb": 0.25
+      }
+    },
+    "stats": {
+      "saves": 3,
+      "loads": 0,
+      "hits": 0,
+      "misses": 0,
+      "evictions": 0,
+      "bytes_written": 161911482,
+      "bytes_read": 0,
+      "entries": 3,
+      "total_bytes": 161911482,
+      "total_bytes_mb": 154.41
+    }
+  },
+  "exp4_compression": {
+    "uncompressed_bytes": 54593774,
+    "compressed_bytes": 345,
+    "nonzero_bytes": 54407415,
+    "zero_padding_pct": 0.3,
+    "compression_ratio_raw": 158242.82,
+    "compression_ratio_effective": 157702.65,
+    "save_uncompressed_ms": 129.12,
+    "save_compressed_ms": 2.31,
+    "load_uncompressed_ms": 21.21,
+    "load_compressed_ms": 16.02
+  },
+  "exp5_long_context": {
+    "n_ctx": 8192,
+    "n_prefix_tokens": 58,
+    "scales": [
+      {
+        "ctx_ratio": 0.01,
+        "n_tokens": 81,
+        "cold_ms": 12.51,
+        "save_ms": 190.25,
+        "load_ms": 22.81,
+        "state_mb": 52.78,
+        "nonzero_pct": 99.7,
+        "speedup_vs_cold": 0.55,
+        "disk_wins": false
+      },
+      {
+        "ctx_ratio": 0.05,
+        "n_tokens": 409,
+        "cold_ms": 41.27,
+        "save_ms": 279.41,
+        "load_ms": 28.07,
+        "state_mb": 63.04,
+        "nonzero_pct": 99.7,
+        "speedup_vs_cold": 1.47,
+        "disk_wins": true
+      },
+      {
+        "ctx_ratio": 0.1,
+        "n_tokens": 819,
+        "cold_ms": 160.17,
+        "save_ms": 273.5,
+        "load_ms": 133.89,
+        "state_mb": 75.86,
+        "nonzero_pct": 99.7,
+        "speedup_vs_cold": 1.2,
+        "disk_wins": true
+      },
+      {
+        "ctx_ratio": 0.25,
+        "n_tokens": 2048,
+        "cold_ms": 273.75,
+        "save_ms": 335.74,
+        "load_ms": 305.43,
+        "state_mb": 114.29,
+        "nonzero_pct": 99.7,
+        "speedup_vs_cold": 0.9,
+        "disk_wins": false
+      },
+      {
+        "ctx_ratio": 0.5,
+        "n_tokens": 4096,
+        "cold_ms": 635.18,
+        "save_ms": 401.95,
+        "load_ms": 663.59,
+        "state_mb": 178.33,
+        "nonzero_pct": 99.7,
+        "speedup_vs_cold": 0.96,
+        "disk_wins": false
+      }
+    ]
+  },
+  "gpu_stats": {
+    "used_mb": 4792.234375,
+    "delta_mb": 2286.1640625
+  }
+}

@@ -16,6 +16,7 @@ Cognitive Outsourcing (CO) is an edge-AI architecture that empowers lightweight 
 | 4 | [SIG as Edge Runtime Primitive](paper/Suspend-and-Inject%20Generation%20as%20an%20Edge%20Inference%20Runtime%20Primitive%20for%20Long-Horizon%20Agent%20Tasks.md) | Deployment (R15–R19), Kitchen benchmark | 2.54× wall-clock speedup, prefill crossover ~1.5–2B, per-token rate 108 vs 103 tok/s | ✅ |
 | **5** | [**Orthogonal Acceleration**](paper/5_Orthogonal_Acceleration/paper.md) | **CO + MTP compound acceleration** | **SIG 3.50×, native MTP 1.27×, SIG+MTP 4.52× compound, ρ = 1.239 (Kitchen)** | **✅ Round 6** |
 | **6** | [**Convergent KVCache Architectures**](paper/6_Convergent_KVCache_Architectures/paper.md) | **KFC unified framework, cloud-edge convergence** | **8-dim convergence analysis, 96–99.8% prefill reduction captured by SIG alone, prefix caching marginal (0.23–3.82%)** | **✅** |
+| **7** | [**Disk-Backed KV-Cache Persistence**](paper/7_DiskKVCache/paper.md) | **H1.1 roadmap implementation, disk-backed prefix reuse** | **State dominated by fixed overhead (99.6% nonzero), break-even N≥6 (0.8B)/N≥14 (4B), sweet spot at 5–10% context utilization** | **✅** |
 
 ## Survey Papers
 
@@ -115,6 +116,7 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 | 4 | [SIG as Edge Runtime Primitive](paper/Suspend-and-Inject%20Generation%20as%20an%20Edge%20Inference%20Runtime%20Primitive%20for%20Long-Horizon%20Agent%20Tasks.md) |
 | 5 | [Orthogonal Acceleration](paper/5_Orthogonal_Acceleration/paper.md) |
 | 6 | [Convergent KVCache Architectures](paper/6_Convergent_KVCache_Architectures/paper.md) |
+| 7 | [Disk-Backed KV-Cache Persistence](paper/7_DiskKVCache/paper.md) |
 | Survey (CN) | [综述：从认知外包到智能体推理引擎](paper/survey_SIG_CO_agent_frameworks_CN.md) |
 | Survey (EN) | [Survey: From CO to Agent Inference Engines](paper/survey_SIG_CO_agent_frameworks_EN.md) |
 
@@ -127,6 +129,9 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 │   │   └── figures/                    # All figures
 │   ├── 6_Convergent_KVCache_Architectures/ # Paper 6: KFC unified framework
 │   │   └── paper.md                    # Full paper
+│   ├── 7_DiskKVCache/                  # Paper 7: Disk-backed KV-Cache persistence
+│   │   ├── paper.md                    # Full paper
+│   │   └── figures/                    # All figures
 │   ├── Cognitive Outsourcing...md      # Paper 1: CO architecture
 │   ├── Beyond_the_Injection_Engine.md  # Paper 2: Theory (R1–R5)
 │   ├── CO_SIG_Architecture...md        # Paper 3: Design space (R6–R14)
@@ -222,7 +227,7 @@ python cross_arch_sig_bench.py --model models/gemma-4-E2B-it-Q4_K_M.gguf
          for Scalable Embodied Intelligence},
   author={SIG/CO Research Program},
   year={2026},
-  note={Papers 1--6 in the SIG/CO Research Program}
+  note={Papers 1--7 in the SIG/CO Research Program}
 }
 
 @article{co-sig-survey-2026,
