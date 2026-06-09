@@ -17,6 +17,7 @@ Cognitive Outsourcing (CO) is an edge-AI architecture that empowers lightweight 
 | **5** | [**Orthogonal Acceleration**](paper/5_Orthogonal_Acceleration/paper.md) | **CO + MTP compound acceleration** | **SIG 3.50×, native MTP 1.27×, SIG+MTP 4.52× compound, ρ = 1.239 (Kitchen)** | **✅ Round 6** |
 | **6** | [**Convergent KVCache Architectures**](paper/6_Convergent_KVCache_Architectures/paper.md) | **KFC unified framework, cloud-edge convergence** | **8-dim convergence analysis, 96–99.8% prefill reduction captured by SIG alone, prefix caching marginal (0.23–3.82%)** | **✅** |
 | **7** | [**Disk-Backed KV-Cache Persistence**](paper/7_DiskKVCache/paper.md) | **H1.1 roadmap implementation, disk-backed prefix reuse** | **State dominated by fixed overhead (99.6% nonzero), break-even N≥6 (0.8B)/N≥14 (4B), sweet spot at 5–10% context utilization** | **✅** |
+| **8** | [**State-Externalizing Cognitive Module Harnesses**](paper/8_State_Externalizing_Cognitive_Modules/paper.md) | **SECM-H architecture, agent-driven evaluation** | **H1 confirmed (76.5% externalizable); Agent-driven: 97.1% ToolAcc vs SIG 94.3% under noise; Path B confirmed (+0.050 CQ); NL rendering +0.113 CQ; H5 refuted** | **✅** |
 
 ## Survey Papers
 
@@ -106,6 +107,28 @@ Compound speedup increases with context length, validating the orthogonality hyp
 
 Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully functional); MTP draft model pairing blocked by Type 3 obstacle.
 
+### State-Externalizing Cognitive Module Harnesses (Paper 8)
+
+Paper 8 investigates whether the Meaning Compiler's implicit module management can be externalized to a structured harness (SECM-H). The key methodological contribution is the discovery that **benchmark design must test the capability being evaluated**: pre-scripted tool-call benchmarks bypass the very module management SECM-H externalizes, creating a ceiling effect that masks its value.
+
+**State decomposition (EXP-1)**: 76.5% of module management functions (13/17) are fully externalizable, consuming up to 12% of context at 35 steps.
+
+**Pre-scripted benchmarks (EXP-3/9/10)**: The SIG baseline outperforms all injection strategies. SECM-H-full degrades $Q_{content}$ by $\Delta = -0.141$ and increases latency 3.7×. The model's implicit KV-cache tracking is well-adapted to deterministic tasks.
+
+**Agent-driven benchmarks (EXP-11/12)**: When the model autonomously selects tools, SECM-H demonstrates genuine value under noise:
+
+| Metric | SIG | SECM-H (full) | SECM-H (selective) |
+|--------|-----|--------------|-------------------|
+| Tool accuracy (noisy) | 94.3% | **97.1%** | 91.4% |
+| $Q_{content}$ (noisy) | 0.535 | **0.636** | 0.661 |
+| $Q_{content}$ (clean) | 0.596 | 0.626 | **0.718** |
+
+**Path A/B disentanglement (EXP-13)**: Forced-selection experiments confirm that SECM-H's state injection changes generation behavior (Path B: $\Delta Q_{content} = +0.050$), independent of tool selection improvement.
+
+**Format interference (EXP-14)**: Natural-language state rendering achieves $\Delta Q_{content} = +0.113$ over template format, confirming that format interference is a significant component of the attention disruption mechanism.
+
+**Core lesson**: SECM-H functions as a **generation stabilizer for autonomous agents under decision uncertainty**, not as a general-purpose cognitive architecture layer. Its value is specific to scenarios requiring dynamic module selection with varying reliability.
+
 ## Read the Papers
 
 | Paper | Link |
@@ -117,6 +140,8 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 | 5 | [Orthogonal Acceleration](paper/5_Orthogonal_Acceleration/paper.md) |
 | 6 | [Convergent KVCache Architectures](paper/6_Convergent_KVCache_Architectures/paper.md) |
 | 7 | [Disk-Backed KV-Cache Persistence](paper/7_DiskKVCache/paper.md) |
+| 8 | [State-Externalizing Cognitive Module Harnesses](paper/8_State_Externalizing_Cognitive_Modules/paper.md) |
+| Report | [Experiment Report](EXPERIMENT_REPORT.md) (Paper 8 data summary) |
 | Survey (CN) | [综述：从认知外包到智能体推理引擎](paper/survey_SIG_CO_agent_frameworks_CN.md) |
 | Survey (EN) | [Survey: From CO to Agent Inference Engines](paper/survey_SIG_CO_agent_frameworks_EN.md) |
 
@@ -132,6 +157,8 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 │   ├── 7_DiskKVCache/                  # Paper 7: Disk-backed KV-Cache persistence
 │   │   ├── paper.md                    # Full paper
 │   │   └── figures/                    # All figures
+│   ├── 8_State_Externalizing_Cognitive_Modules/ # Paper 8: SECM-H
+│   │   └── paper.md                    # Full paper
 │   ├── Cognitive Outsourcing...md      # Paper 1: CO architecture
 │   ├── Beyond_the_Injection_Engine.md  # Paper 2: Theory (R1–R5)
 │   ├── CO_SIG_Architecture...md        # Paper 3: Design space (R6–R14)
@@ -139,6 +166,7 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 │   ├── survey_SIG_CO_agent_frameworks_CN.md  # Survey (Chinese)
 │   └── survey_SIG_CO_agent_frameworks_EN.md  # Survey (English)
 ├── data/                               # Raw experiment data (JSON)
+│   ├── exp8_*/                         # Paper 8 data (not in git, see EXPERIMENT_REPORT.md)
 │   ├── exp1_4B/                        # EXP-1: Orthogonality (4B)
 │   ├── exp1_08B/                       # EXP-1: Orthogonality (0.8B)
 │   ├── exp2_4B/                        # EXP-2: Injection-event depression
@@ -164,9 +192,23 @@ Gemma-4 SpecDec compatibility: 5/6 behavioral tests pass (main model fully funct
 │   ├── mtp_heads.py                    # MTP head training (Track A)
 │   ├── acceptance_tracker.py           # Acceptance rate tracking & recovery
 │   ├── meaning_compiler.py             # KV-cache-aware meaning compiler
-│   ├── quality.py                      # Hybrid semantic quality scorer
+│   ├── harness/                        # SECM-H harness module (Paper 8)
+│   │   ├── harness.py                  # Main SECMHarness class
+│   │   ├── registry.py                 # R_t: module registry
+│   │   ├── history.py                  # H_t: invocation history
+│   │   ├── confidence.py               # C_t: reliability tracking
+│   │   ├── dependency.py               # D_t: dependency graph
+│   │   ├── pattern_cache.py            # P_t: cognitive patterns
+│   │   ├── budget.py                   # B_t: budget management
+│   │   └── renderer.py                 # State rendering
+│   ├── quality.py                      # ContentQualityEvaluator (5-dim) + SemanticScorer
 │   ├── metrics.py                      # Statistical + semantic similarity utilities
 │   └── gpu.py                          # GPU monitoring
+├── EXPERIMENT_REPORT.md                # Paper 8: all experiment data summaries (15 tables)
+├── exp8_state_decomposition.py         # Paper 8: EXP-1 state decomposition audit
+├── exp8_kitchen_benchmark.py           # Paper 8: EXP-3/4/5 pre-scripted kitchen
+├── exp8_v2_channel_strategies.py       # Paper 8: EXP-9/10 channel strategies + noisy
+├── exp8_v3_agent_driven.py             # Paper 8: EXP-11/12/13/14/15 agent-driven
 ├── r2_degradation_deep.py              # R2 deep validation (64 rounds, 3 models)
 ├── r1_attention_multiprompt.py         # R1 multi-prompt attention analysis
 ├── cross_arch_sig_bench.py             # Cross-architecture SIG benchmark
@@ -217,6 +259,13 @@ python r2_degradation_deep.py --model models/Qwen3.5-0.8B-Q4_K_M.gguf --max-roun
 
 # Run Gemma-4 cross-architecture SIG benchmark
 python cross_arch_sig_bench.py --model models/gemma-4-E2B-it-Q4_K_M.gguf
+
+# Run Paper 8 experiments
+python exp8_state_decomposition.py                                    # EXP-1: state decomposition audit
+python exp8_kitchen_benchmark.py --n-runs 5                           # EXP-3/4/5: pre-scripted kitchen
+python exp8_v2_channel_strategies.py --task all --n-runs 3            # EXP-9/10: channel strategies
+python exp8_v3_agent_driven.py --task all --n-runs 3 --n-steps 35    # EXP-11/12/13/14: agent-driven
+python exp8_v3_agent_driven.py --task exp15 --n-runs 3 --n-steps 35  # EXP-15: 0.8B agent-driven
 ```
 
 ## Citation
@@ -227,7 +276,7 @@ python cross_arch_sig_bench.py --model models/gemma-4-E2B-it-Q4_K_M.gguf
          for Scalable Embodied Intelligence},
   author={SIG/CO Research Program},
   year={2026},
-  note={Papers 1--7 in the SIG/CO Research Program}
+  note={Papers 1--8 in the SIG/CO Research Program}
 }
 
 @article{co-sig-survey-2026,
