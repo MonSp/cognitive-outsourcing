@@ -12,7 +12,7 @@
 
 Modern LLM agent frameworks (LangChain, AutoGPT, SWE-agent, etc.) universally adopt **stateless application-layer loops** to orchestrate tool calls—after each external interaction, the model must re-encode all context from scratch, leading to quadratically growing prefill costs and catastrophic disruption of attention states. This survey reviews the core ideas of the Cognitive Outsourcing (CO) and Suspend-and-Inject Generation (SIG) research program: elevating tool interaction from an application-layer interface to an **inference-engine-level primitive**, achieving cross-tool-call cognitive continuity via KV-Cache injection.
 
-Based on the complete empirical and theoretical body of the six-paper series, this survey is organized across three dimensions: (1) **SIG's core ideas**—the KV-Cache continuity principle, the five-stage suspend-inject-resume loop, and the "trading storage for computation" design philosophy; (2) **CO's cognitive architecture**—how the three-layer system (meaning compiler, injection engine, cognitive module ecosystem) endows lightweight edge models with dynamic access to external cognitive resources; and (3) **implications for modern agent frameworks**—how stateful runtimes, composable acceleration orthogonality, Batch-SIG's architecture-agnosticism, and the KV-Cache-as-First-Class-Citizen (KFC) unified optimization framework can reshape agent system design.
+Based on the complete empirical and theoretical body of the seven-paper series, this survey is organized across three dimensions: (1) **SIG's core ideas**—the KV-Cache continuity principle, the five-stage suspend-inject-resume loop, and the "trading storage for computation" design philosophy; (2) **CO's cognitive architecture**—how the three-layer system (meaning compiler, injection engine, cognitive module ecosystem) endows lightweight edge models with dynamic access to external cognitive resources; and (3) **implications for modern agent frameworks**—how stateful runtimes, composable acceleration orthogonality, Batch-SIG's architecture-agnosticism, and the KV-Cache-as-First-Class-Citizen (KFC) unified optimization framework can reshape agent system design.
 
 This survey aims to provide agent inference framework designers with a complete roadmap from principles to practice, delineating SIG's zone of advantage, design boundaries, and its profound impact on next-generation edge-cloud collaborative agent architectures.
 
@@ -297,6 +297,7 @@ Edge inference runtimes can detect workload characteristics at runtime and route
 3. **Tool latency sensitivity**. SIG's end-to-end speedup collapses to 1.08× at 500ms tool latency [3]. This constrains SIG's value proposition to scenarios with fast local tool execution (<100ms).
 4. **Cache enumeration limitation**. KV-Cache injection supports single-entity associative access (100% completion) but not multi-entity exhaustive enumeration (0%) [3]. This is a fundamental architectural limitation of SIG.
 5. **Synthetic tools**. All benchmarks use synthetic tool implementations. Real-world tool latency, noise, and variable response lengths may interact with SIG's injection granularity in uncharacterized ways.
+6. **Conditional value of state externalisation.** SECM-H [7] experiments reveal an important methodological lesson: pre-scripted benchmarks bypass the evaluation of module management capabilities. In pre-scripted scenarios, the model's implicit KV-Cache tracking is sufficient, and injecting module management state *degrades* quality ($\Delta Q_{content} = -0.141$). Only in agent-driven noisy scenarios does SECM-H demonstrate positive value ($\text{ToolAcc} = 97.1\%$ vs SIG's $94.3\%$). This shows that the value of state externalisation depends on whether the task genuinely tests the externalised capability.
 
 ### 7.2 Future Directions
 
@@ -306,6 +307,8 @@ Edge inference runtimes can detect workload characteristics at runtime and route
 4. **Runtime integration of Batch-SIG dependency classifier**. Integrating the `DependencyAnalyzer` into edge inference runtimes for automatic batch size selection [3].
 5. **Physical robot deployment for embodied agents**. Current benchmarks abstract physical actions as text-based tool calls. Deploying SIG+MTP on physical robots validates the framework under real-world conditions.
 6. **KV-Cache standardization**. Proposing standardization of KV-Cache metadata schemas to resolve format fragmentation across llama.cpp, vLLM, SGLang, and TensorRT-LLM [6].
+7. **Deeper investigation of module management state externalisation.** Paper 8 [7] demonstrates that in autonomous agent scenarios, module reliability tracking (SECM-H) improves content quality ($\Delta Q_{content} = +0.101$ under noise). Key open questions include: (a) Path A/B causal decoupling—whether quality improvement stems primarily from better tool selection or changed generation behaviour; (b) whether natural-language state rendering ($\Delta Q_{content} = +0.113$) can replace structured template injection; (c) the model-size boundary—the precise crossover point where models transition from benefiting (2B) to not benefiting (0.8B).
+8. **Agent-driven evaluation benchmarks.** Paper 8 reveals a fundamental flaw in pre-scripted benchmarks: when tool selection is pre-determined, any optimisation affecting module selection capability cannot be measured. Future research should establish standardised agent-driven evaluation frameworks that systematically vary module count, failure rate, and dependency depth to accurately assess the value of cognitive architecture layers.
 
 ---
 
@@ -318,6 +321,8 @@ The core ideas of Suspend-and-Inject Generation can be distilled into three prin
 2. **KV-Cache is working memory, not transient data.** Preserving the model's attention state across tool call boundaries not only eliminates 73-97% of redundant prefill, but more importantly maintains cognitive continuity—which has a decisive impact on small models' multi-turn tool-use capability.
 
 3. **Trading storage for computation is a cross-regime unifying principle.** From edge injection continuity to cloud global KV-Cache pools, the principle of treating KV-Cache as a first-class citizen is unified, merely manifesting differently across deployment regimes.
+
+Paper 8 [7] adds an important qualification to this paradigm: **the value of state externalisation depends on whether the task genuinely tests the externalised capability.** SECM-H's module management state is pure noise in pre-scripted benchmarks, but provides genuine decision support in agent-driven noisy scenarios. This not only revises our understanding of cognitive architecture layers—from "universal Layer 2" to "generation stabilizer under specific conditions"—but raises a general methodological caution: evaluation benchmarks must match the capability being evaluated.
 
 For modern agent frameworks, the implications of the CO-SIG research program are structural: it is not merely another performance optimization trick, but a proposal to **rethink the agent inference pipeline paradigm**—a stateful, KV-Cache-centric, composable-acceleration, privacy-preserving edge agent runtime. This paradigm's value grows with model scale and task complexity; its design boundaries have been systematically characterized; its core mechanisms have been cross-architecturally validated.
 
@@ -339,24 +344,26 @@ As Mooncake and SIG independently converging on the same design philosophy from 
 
 [6] Convergent KVCache Architectures: Bridging Cloud-Scale Disaggregated Serving and Edge-Native Injection Continuity. *CO+SIG Research Program, Paper 6*, 2026.
 
-[7] R. Qin et al. Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving. *arXiv:2407.00079*, 2024. FAST 2025 Best Paper.
+[7] State-Externalizing Cognitive Module Harnesses: Elevating Cognitive Outsourcing from Injection-Level to System-Level Orchestration. *CO+SIG Research Program, Paper 8*, 2026.
 
-[8] W. Kwon et al. Efficient Memory Management for Large Language Model Serving with PagedAttention. *SOSP*, 2023.
+[8] R. Qin et al. Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving. *arXiv:2407.00079*, 2024. FAST 2025 Best Paper.
 
-[9] L. Zheng et al. SGLang: Efficient Execution of Structured Language Model Programs. *NeurIPS*, 2024.
+[9] W. Kwon et al. Efficient Memory Management for Large Language Model Serving with PagedAttention. *SOSP*, 2023.
 
-[10] S. Kim et al. LLMCompiler: An LLM Compiler for Parallel Function Calling. *arXiv:2402.04578*, 2024.
+[10] L. Zheng et al. SGLang: Efficient Execution of Structured Language Model Programs. *NeurIPS*, 2024.
 
-[11] Robo-Cortex: A Continual Cognitive Learning Architecture for Embodied Agents. *Working Paper*, 2026.
+[11] S. Kim et al. LLMCompiler: An LLM Compiler for Parallel Function Calling. *arXiv:2402.04578*, 2024.
 
-[12] J. Hu et al. ECHO: Elastic Speculative Decoding with Sparse Gating for High-Concurrency Scenarios. *Working Paper*, 2026.
+[12] Robo-Cortex: A Continual Cognitive Learning Architecture for Embodied Agents. *Working Paper*, 2026.
 
-[13] G. Xiao et al. Efficient Streaming Language Models with Attention Sinks. *ICLR*, 2024.
+[13] J. Hu et al. ECHO: Elastic Speculative Decoding with Sparse Gating for High-Concurrency Scenarios. *Working Paper*, 2026.
 
-[14] Z. Zhang et al. H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models. *NeurIPS*, 2023.
+[14] G. Xiao et al. Efficient Streaming Language Models with Attention Sinks. *ICLR*, 2024.
 
-[15] C. Dwork et al. The Algorithmic Foundations of Differential Privacy. *Foundations and Trends in TCS*, 2014.
+[15] Z. Zhang et al. H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models. *NeurIPS*, 2023.
 
-[16] DeepSeek-AI. DeepSeek-V3 Technical Report. 2025.
+[16] C. Dwork et al. The Algorithmic Foundations of Differential Privacy. *Foundations and Trends in TCS*, 2014.
 
-[17] Y. Leviathan et al. Fast Inference from Transformers via Speculative Decoding. *ICML*, 2023.
+[17] DeepSeek-AI. DeepSeek-V3 Technical Report. 2025.
+
+[18] Y. Leviathan et al. Fast Inference from Transformers via Speculative Decoding. *ICML*, 2023.
