@@ -19,6 +19,12 @@ _test_*.py
 _diagnose_*.py
 _gen_*.py
 
+# Temporary verification and analysis scripts
+_analysis.py
+_check.py
+_v*.py
+_verify*.py
+
 # Internal workspace
 _workspace/
 
@@ -57,3 +63,11 @@ st_lib/
 
 # Smoke test intermediate results
 data/exp_mtp_full_v2_smoke*.json
+
+# Paper 8 experiment data (too large for git, summarized in EXPERIMENT_REPORT.md)
+data/exp8_ablation/
+data/exp8_kitchen/
+data/exp8_scaling/
+data/exp8_state_audit/
+data/exp8_v2/
+data/exp8_v3/
