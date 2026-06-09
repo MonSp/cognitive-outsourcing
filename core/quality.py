@@ -344,6 +344,202 @@ def build_kitchen_ground_truth(scenario_steps) -> Dict:
     }
 
 
+class ContentQualityEvaluator:
+    """Evaluates content-level quality of agent responses.
+
+    Measures three dimensions that the simple tool_execution_rate metric
+    cannot capture:
+    1. Information Coverage — fraction of tool result facts reflected in
+       the agent's generated responses.
+    2. Response Quality — whether generated text is useful, non-repetitive,
+       and appropriately concise.
+    3. Context Utilisation — whether the model leverages injected context
+       (tool results, harness state) effectively.
+    """
+
+    def __init__(self, scenario_steps):
+        self._scorer = SemanticScorer()
+        self._steps = scenario_steps
+
+    def evaluate(self, gen_texts: List[str], tool_results: List[str]) -> Dict[str, float]:
+        n = min(len(gen_texts), len(tool_results), len(self._steps))
+        if n == 0:
+            return {"information_coverage": 0.0, "response_quality": 0.0,
+                    "context_utilisation": 0.0, "semantic_adequacy": 0.0,
+                    "information_density": 0.0, "content_composite": 0.0}
+
+        coverage_scores = []
+        quality_scores = []
+        adequacy_scores = []
+        density_scores = []
+
+        for i in range(n):
+            gt = gen_texts[i] if i < len(gen_texts) else ""
+            tr = tool_results[i] if i < len(tool_results) else ""
+            step = self._steps[i] if i < len(self._steps) else None
+
+            coverage_scores.append(self._information_coverage(gt, tr, step))
+            quality_scores.append(self._response_quality(gt))
+            adequacy_scores.append(self._semantic_adequacy(gt, tr))
+            density_scores.append(self._information_density(gt))
+
+        avg_coverage = sum(coverage_scores) / len(coverage_scores)
+        avg_quality = sum(quality_scores) / len(quality_scores)
+        context_util = self._context_utilisation(gen_texts, tool_results)
+        avg_adequacy = sum(adequacy_scores) / len(adequacy_scores)
+        avg_density = sum(density_scores) / len(density_scores)
+
+        composite = (0.30 * avg_coverage + 0.20 * avg_quality
+                     + 0.15 * context_util + 0.20 * avg_adequacy
+                     + 0.15 * avg_density)
+
+        return {
+            "information_coverage": round(avg_coverage, 4),
+            "response_quality": round(avg_quality, 4),
+            "context_utilisation": round(context_util, 4),
+            "semantic_adequacy": round(avg_adequacy, 4),
+            "information_density": round(avg_density, 4),
+            "content_composite": round(composite, 4),
+            "coverage_detail": [round(s, 4) for s in coverage_scores],
+        }
+
+    def _information_coverage(self, gen_text: str, tool_result: str,
+                              step=None) -> float:
+        if not gen_text.strip() or not tool_result.strip():
+            return 0.0
+
+        result_tokens = set(_tokenize(tool_result))
+        gen_tokens = set(_tokenize(gen_text))
+
+        content_words = {w for w in result_tokens
+                         if len(w) > 2 and w not in _STOPWORDS}
+        gen_content = {w for w in gen_tokens
+                       if len(w) > 2 and w not in _STOPWORDS}
+
+        if not content_words:
+            return 0.5
+
+        overlap = content_words & gen_content
+        coverage = len(overlap) / len(content_words)
+
+        return min(1.0, coverage)
+
+    def _response_quality(self, gen_text: str) -> float:
+        text = gen_text.strip()
+        if not text:
+            return 0.0
+
+        score = 0.0
+
+        tokens = _tokenize(text)
+        word_count = len(tokens)
+        if word_count >= 3:
+            score += 0.3
+        elif word_count >= 1:
+            score += 0.15
+
+        if tokens:
+            unique_ratio = len(set(tokens)) / len(tokens)
+            score += 0.3 * min(1.0, unique_ratio * 1.5)
+
+        if not self._has_repetition(text):
+            score += 0.2
+        else:
+            score += 0.05
+
+        density = self._information_density(gen_text)
+        if 3 <= word_count <= 30 and density >= 0.4:
+            score += 0.2
+        elif density >= 0.35:
+            score += 0.15
+        elif density >= 0.25:
+            score += 0.1
+        else:
+            score += 0.02
+
+        return min(1.0, score)
+
+    def _semantic_adequacy(self, gen_text: str, tool_result: str) -> float:
+        """TF-IDF cosine similarity between tool result and response.
+
+        Unlike coverage (which is set-based), this measures directional
+        semantic alignment — how much of the response's meaning aligns
+        with the tool result."""
+        if not gen_text.strip() or not tool_result.strip():
+            return 0.0
+        return self._scorer.similarity(tool_result, gen_text)
+
+    def _information_density(self, gen_text: str) -> float:
+        """Ratio of content words to total words. Higher = more concise.
+
+        Content words are non-stopwords with length > 2."""
+        tokens = _tokenize(gen_text)
+        if not tokens:
+            return 0.0
+        content = [t for t in tokens if len(t) > 2 and t not in _STOPWORDS]
+        return len(content) / len(tokens)
+
+    def _context_utilisation(self, gen_texts: List[str],
+                             tool_results: List[str]) -> float:
+        n = min(len(gen_texts), len(tool_results))
+        if n == 0:
+            return 0.0
+
+        tool_vocab = set()
+        for tr in tool_results:
+            tool_vocab.update(_tokenize(tr))
+        tool_vocab = {w for w in tool_vocab if len(w) > 2 and w not in _STOPWORDS}
+
+        if not tool_vocab:
+            return 0.5
+
+        gen_vocab = set()
+        for gt in gen_texts:
+            gen_vocab.update(_tokenize(gt))
+        gen_vocab = {w for w in gen_vocab if len(w) > 2 and w not in _STOPWORDS}
+
+        if not gen_vocab:
+            return 0.0
+
+        overlap = tool_vocab & gen_vocab
+        return min(1.0, len(overlap) / len(tool_vocab) * 1.2)
+
+    def _has_repetition(self, text: str) -> bool:
+        words = text.lower().split()
+        if len(words) < 6:
+            return False
+        for pat_len in range(3, min(15, len(words) // 3)):
+            for i in range(len(words) - pat_len * 2 + 1):
+                pat = words[i:i + pat_len]
+                rest = words[i + pat_len:]
+                count = 0
+                for j in range(len(rest) - pat_len + 1):
+                    if rest[j:j + pat_len] == pat:
+                        count += 1
+                if count >= 2:
+                    return True
+        return False
+
+
+_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "need", "must", "to", "of",
+    "in", "for", "on", "with", "at", "by", "from", "as", "into", "about",
+    "like", "through", "after", "over", "between", "out", "against",
+    "during", "without", "before", "under", "around", "among", "and",
+    "but", "or", "nor", "not", "so", "yet", "both", "either", "neither",
+    "each", "every", "all", "any", "few", "more", "most", "other", "some",
+    "such", "no", "only", "own", "same", "than", "too", "very", "just",
+    "because", "if", "when", "where", "how", "what", "which", "who",
+    "whom", "this", "that", "these", "those", "it", "its", "i", "me",
+    "my", "we", "our", "you", "your", "he", "him", "his", "she", "her",
+    "they", "them", "their", "here", "there", "then", "also", "still",
+    "already", "now", "well", "back", "up", "down", "off", "above",
+    "below", "again", "once", "further", "while", "until", "since",
+}
+
+
 def build_travel_ground_truth(scenario_turns: List[Dict]) -> Dict:
     """Extract ground truth for Travel quality evaluation from scenario turns."""
     target_cities = set()

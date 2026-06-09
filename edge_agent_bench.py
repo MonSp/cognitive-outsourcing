@@ -506,6 +506,8 @@ class EdgeKitchenSIG:
 
     def run(self, scenario, probes=None, max_new=80, debug=False):
         metrics = init_metrics()
+        metrics["gen_texts"] = []
+        metrics["tool_results"] = []
         self.engine.reset()
         sys_ids = list(self.compiler.tokenize(f"{KITCHEN_SYSTEM_PROMPT}\n\n", add_bos=False))
         pf_t0 = time.time()
@@ -527,6 +529,7 @@ class EdgeKitchenSIG:
             self.engine.update_cache(u_ids)
 
             result = self.tools.execute(step.tool_name, step.tool_args)
+            metrics["tool_results"].append(result)
             tool_line = f"\n[Tool: {step.tool_name}] {result}\n"
             t_ids = list(self.compiler.tokenize(tool_line, add_bos=False))
             self.compiler.eval(t_ids)
@@ -538,6 +541,7 @@ class EdgeKitchenSIG:
                 "\nUser:", max_new=max_new, rep_threshold=3)
             metrics["total_gen_time"] += time.time() - gen_t0
             metrics["total_gen_tokens"] += len(gen_ids)
+            metrics["gen_texts"].append(gen_text)
             self.engine.update_cache(list(gen_ids))
 
             metrics["per_turn_ttf"].append(time.time() - step_t0)
@@ -576,6 +580,8 @@ class EdgeKitchenAppLoop:
 
     def run(self, scenario, probes=None, max_new=80, debug=False):
         metrics = init_metrics()
+        metrics["gen_texts"] = []
+        metrics["tool_results"] = []
         context = f"{KITCHEN_SYSTEM_PROMPT}\n\n"
         probe_idx = 0
         probe_results = []
@@ -586,6 +592,7 @@ class EdgeKitchenAppLoop:
             step_t0 = time.time()
             context += f"\nUser: {step.user_query}\n"
             result = self.tools.execute(step.tool_name, step.tool_args)
+            metrics["tool_results"].append(result)
             context += f"[Tool: {step.tool_name}] {result}\nAssistant:"
 
             full_ids = list(self.compiler.tokenize(context, add_bos=False))
@@ -601,6 +608,7 @@ class EdgeKitchenAppLoop:
                     "\nUser:", max_new=max_new, rep_threshold=3)
                 metrics["total_gen_time"] += time.time() - gen_t0
                 metrics["total_gen_tokens"] += len(gen_ids)
+                metrics["gen_texts"].append(gen_text)
                 context += gen_text + "\n"
                 completed += 1
             except RuntimeError as e:
