@@ -18,6 +18,7 @@ Cognitive Outsourcing (CO) is an edge-AI architecture that empowers lightweight 
 | **6** | [**Convergent KVCache Architectures**](paper/6_Convergent_KVCache_Architectures/paper.md) | **KFC unified framework, cloud-edge convergence** | **8-dim convergence analysis, 96–99.8% prefill reduction captured by SIG alone, prefix caching marginal (0.23–3.82%)** | **✅** |
 | **7** | [**Disk-Backed KV-Cache Persistence**](paper/7_DiskKVCache/paper.md) | **H1.1 roadmap implementation, disk-backed prefix reuse** | **State dominated by fixed overhead (99.6% nonzero), break-even N≥6 (0.8B)/N≥14 (4B), sweet spot at 5–10% context utilization** | **✅** |
 | **8** | [**State-Externalizing Cognitive Module Harnesses**](paper/8_State_Externalizing_Cognitive_Modules/paper.md) | **SECM-H architecture, agent-driven evaluation** | **H1 confirmed (76.5% externalizable); Agent-driven: 97.1% ToolAcc vs SIG 94.3% under noise; Path B confirmed (+0.050 CQ); NL rendering +0.113 CQ; H5 refuted** | **✅** |
+| **9** | [**Consolidating the CO-SIG Research Program**](paper/9_Consolidated_Experiment_Restructuring/paper.md) | **Meta-empirical synthesis, unified experiments, contradiction resolution** | **Definitive SIG speedup 2.55× (±0.5%), crossover ~0.7B, all 6 contradictions resolved, utilization gap vs information loss distinction** | **✅** |
 
 ## Survey Papers
 
@@ -25,6 +26,47 @@ Cognitive Outsourcing (CO) is an edge-AI architecture that empowers lightweight 
 |-------|----------|-------|
 | [综述：从认知外包到智能体推理引擎](paper/survey_SIG_CO_agent_frameworks_CN.md) | 中文 | SIG 核心理念 + CO 认知架构 + 对现代智能体框架的启发 |
 | [Survey: From Cognitive Outsourcing to Agent Inference Engines](paper/survey_SIG_CO_agent_frameworks_EN.md) | English | SIG core ideas + CO cognitive architecture + implications for modern agent frameworks |
+
+## Consolidation: Paper 9
+
+Paper 9 is a meta-empirical synthesis that resolves all six contradictions accumulated across Papers 1–8 through a unified experiment framework (8 experiments, ~270 runs, RTX 4070 SUPER, Qwen3.5-0.8B/4B Q4_K_M).
+
+### Definitive SIG Speedup
+
+The SIG speedup under unified protocol is **2.55×** (95% CI [2.548, 2.551], n=10, p<0.001, Cohen's d=214.2), consistent across six independent experiments within ±0.5%.
+
+### Contradiction Resolution
+
+| # | Contradiction | Root Cause | Resolution |
+|---|--------------|------------|------------|
+| C1 | Speedup: 2.54× vs 3.50× vs 4.71× | Different step counts, infrastructure, FA normalization | **2.55× under unified protocol** |
+| C2 | Crossover: ~0.7B vs 1.0B vs 1.5–2B | Only 2 data points in prior estimates | **~0.7B confirmed (4-point parametric fit)** |
+| C3 | Generation inflation: KV-cache vs prompt-format | Paper 1 misattributed to KV-cache expansion | **Prompt-format artifact (1.85× ratio)** |
+| C4 | SECM-H: negative vs positive | Pre-scripted benchmarks bypass module selection | **ΔQ_content swing +0.242 (pre-scripted → agent-driven)** |
+| C5 | Coverage: 33% vs 1% | Chain depth interaction, not KV-cache degradation | **Utilization gap (zero cache degradation across 32 rounds)** |
+| C6 | AppLoop-PC: worse vs useful | Within-session harmful, cross-session beneficial | **Break-even: N≥14 (4B), N≥6 (0.8B)** |
+
+### Key Insight: Utilization Gap vs Information Loss
+
+Deep KV-cache recall validation across 32 injection rounds (4B, up to 6800 cache tokens) shows **zero observable degradation** — short-term recall stable at 0.90, long-term at 0.933. Paper 1's 1% coverage in Deep chain was NOT caused by KV-cache degradation but by the model's failure to actively utilize injected information during generation. This is a **utilization gap**, not information loss — SIG preserves information perfectly; the bottleneck is downstream retrieval during generation.
+
+### Speedup vs Chain Depth
+
+| Depth (steps) | 4B Speedup | 0.8B Speedup |
+|--------------|-----------|-------------|
+| 5 | 1.43× | 0.60× |
+| 10 | 1.75× | 0.60× |
+| 20 | 2.60× | 0.85× |
+| 35 | 2.52× | 1.10× |
+| 50 | **3.65×** | **1.49×** |
+
+### Cross-Architecture Speedup
+
+| Architecture | SIG Speedup | Verdict |
+|-------------|-----------|---------|
+| Qwen3.5-4B | **2.54×** | SIG faster |
+| Nemotron-3-Nano-4B | **1.35×** | SIG faster |
+| Gemma-4-E2B | **0.86×** | SIG slower |
 
 ## Core Findings Across the Program
 
@@ -141,6 +183,7 @@ Paper 8 investigates whether the Meaning Compiler's implicit module management c
 | 6 | [Convergent KVCache Architectures](paper/6_Convergent_KVCache_Architectures/paper.md) |
 | 7 | [Disk-Backed KV-Cache Persistence](paper/7_DiskKVCache/paper.md) |
 | 8 | [State-Externalizing Cognitive Module Harnesses](paper/8_State_Externalizing_Cognitive_Modules/paper.md) |
+| 9 | [Consolidating the CO-SIG Research Program](paper/9_Consolidated_Experiment_Restructuring/paper.md) |
 | Report | [Experiment Report](EXPERIMENT_REPORT.md) (Paper 8 data summary) |
 | Survey (CN) | [综述：从认知外包到智能体推理引擎](paper/survey_SIG_CO_agent_frameworks_CN.md) |
 | Survey (EN) | [Survey: From CO to Agent Inference Engines](paper/survey_SIG_CO_agent_frameworks_EN.md) |
@@ -159,6 +202,11 @@ Paper 8 investigates whether the Meaning Compiler's implicit module management c
 │   │   └── figures/                    # All figures
 │   ├── 8_State_Externalizing_Cognitive_Modules/ # Paper 8: SECM-H
 │   │   └── paper.md                    # Full paper
+│   ├── 9_Consolidated_Experiment_Restructuring/ # Paper 9: Meta-empirical synthesis
+│   │   ├── paper.md                    # Full paper
+│   │   ├── experiments/                # Experiment scripts (EXP-1~8)
+│   │   ├── results/                    # Experiment result JSON files
+│   │   └── figures/                    # 10 publication-quality figures
 │   ├── Cognitive Outsourcing...md      # Paper 1: CO architecture
 │   ├── Beyond_the_Injection_Engine.md  # Paper 2: Theory (R1–R5)
 │   ├── CO_SIG_Architecture...md        # Paper 3: Design space (R6–R14)
@@ -266,6 +314,15 @@ python exp8_kitchen_benchmark.py --n-runs 5                           # EXP-3/4/
 python exp8_v2_channel_strategies.py --task all --n-runs 3            # EXP-9/10: channel strategies
 python exp8_v3_agent_driven.py --task all --n-runs 3 --n-steps 35    # EXP-11/12/13/14: agent-driven
 python exp8_v3_agent_driven.py --task exp15 --n-runs 3 --n-steps 35  # EXP-15: 0.8B agent-driven
+
+# Run Paper 9 consolidated experiments
+cd paper/9_Consolidated_Experiment_Restructuring/experiments
+python run_all.py --list                 # List all experiments
+python run_all.py --dry-run              # Dry-run plan
+python run_all.py --only exp1            # Run single experiment
+python run_all.py                        # Run all experiments (~270 runs)
+python analyze_results.py --tables       # Print reconciliation tables
+python generate_figures.py               # Generate all figures
 ```
 
 ## Citation
@@ -276,7 +333,7 @@ python exp8_v3_agent_driven.py --task exp15 --n-runs 3 --n-steps 35  # EXP-15: 0
          for Scalable Embodied Intelligence},
   author={SIG/CO Research Program},
   year={2026},
-  note={Papers 1--8 in the SIG/CO Research Program}
+  note={Papers 1--9 in the SIG/CO Research Program}
 }
 
 @article{co-sig-survey-2026,

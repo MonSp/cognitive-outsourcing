@@ -1,0 +1,53 @@
+{
+  "F1_speedup_comparison": {
+    "title": "SIG Speedup Under Unified Protocol (EXP-1)",
+    "x": "Condition",
+    "y": "Wall-Clock Time (s)",
+    "type": "bar",
+    "conditions": [
+      "AppLoop",
+      "SIG",
+      "AppLoop-PC",
+      "Sliding"
+    ]
+  },
+  "F3_crossover_curve": {
+    "title": "SIG-vs-AppLoop Crossover (EXP-2)",
+    "x": "Model Size (B params)",
+    "y": "Speedup Factor",
+    "type": "line+scatter",
+    "hline": 1.0
+  },
+  "F5_orthogonality_heatmap": {
+    "title": "Composition Orthogonality Ratios (EXP-3)",
+    "x": "Component",
+    "y": "Model Size",
+    "type": "heatmap",
+    "metric": "rho"
+  },
+  "F7_paradigm_interaction": {
+    "title": "Evaluation Paradigm \u00d7 Noise Interaction (EXP-4)",
+    "x": "Paradigm",
+    "y": "Content Quality (Q_content)",
+    "type": "grouped_bar",
+    "group": "noise"
+  },
+  "F9_pareto_frontier": {
+    "title": "Speedup-Quality-Memory Pareto Frontier (EXP-5)",
+    "x": "Speedup (log)",
+    "y": "Q_content",
+    "z": "KV-Cache Tokens",
+    "type": "3d_scatter"
+  },
+  "F10_coverage_vs_depth": {
+    "title": "Information Coverage vs Chain Depth (EXP-5)",
+    "x": "Chain Depth (steps)",
+    "y": "Information Coverage",
+    "type": "line",
+    "models": [
+      "0.8B",
+      "2B",
+      "4B"
+    ]
+  }
+}
